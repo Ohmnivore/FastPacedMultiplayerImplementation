@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <meta charset="utf-8">
+    <meta name="generator" content="pandoc">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Fast-Paced Multiplayer Implementation: Smooth Client-Side Movement</title>
+</head>
+<body>
+    <div style="border: 5px solid blue; padding: 15px;">
+        <p>
+            <b>Player 1 view</b> - move with LEFT and RIGHT arrow keys<br>
+
+            <span id="player1_recv1"><b>Send</b> ·</span>
+            Lag min = <input id="player1_send_lag_min" size="5" value="100" type="text">ms ·
+            Lag max = <input id="player1_send_lag_max" size="5" value="200" type="text">ms ·
+            Dropped = <input id="player1_send_dropped" size="5" value="2" type="text">% ·
+            Correlation = <input id="player1_send_correlation" size="5" value="75" type="text">% ·
+            Duplicate = <input id="player1_send_duplicate" size="5" value="2" type="text">% ·
+            <input id="player1_symmetric" checked="checked" type="checkbox">Symmetric<br>
+
+            <span id="player1_recv2">
+            <b>Recv</b> ·
+            Lag min = <input id="player1_recv_lag_min" size="5" value="100" type="text">ms ·
+            Lag max = <input id="player1_recv_lag_max" size="5" value="200" type="text">ms ·
+            Dropped = <input id="player1_recv_dropped" size="5" value="2" type="text">% ·
+            Correlation = <input id="player1_recv_correlation" size="5" value="75" type="text">% ·
+            Duplicate = <input id="player1_recv_duplicate" size="5" value="2" type="text">%<br>
+            </span>
+
+            <input id="player1_prediction" checked="checked" type="checkbox">Prediction ·
+            <input id="player1_reconciliation" checked="checked" type="checkbox">Reconciliation ·
+            <input id="player1_interpolation" type="checkbox">Interpolation
+        </p>
+        <canvas id="player1_canvas" width="920" height="75"></canvas>
+        <div id="player1_status" style="font-family:courier;">
+            Non-acknowledged inputs: 0
+        </div>
+    </div>
+    <div style="height: 1em;"></div>
+
+    <div style="border: 3px solid grey; padding: 15px;">
+    <p>
+        <b>Server view</b> ·
+        Update <input id="server_fps" size="5" value="10" type="text"> times per second
+    </p>
+    <canvas id="server_canvas" width="920" height="75"></canvas>
+    <div id="server_status" style="font-family:courier;">
+        Last acknowledged input: Player 0: #4368   Player 1: #852
+    </div>
+    </div>
+    <div style="height: 1em;"></div>
+
+    <div style="border: 5px solid red; padding: 15px;">
+    <p>
+        <b>Player 2 view</b> - move with LEFT and RIGHT arrow keys<br>
+        
+        <span id="player2_recv1"><b>Send</b> ·</span>
+        Lag min = <input id="player2_send_lag_min" size="5" value="100" type="text">ms ·
+        Lag max = <input id="player2_send_lag_max" size="5" value="200" type="text">ms ·
+        Dropped = <input id="player2_send_dropped" size="5" value="2" type="text">% ·
+        Correlation = <input id="player2_send_correlation" size="5" value="75" type="text">% ·
+        Duplicate = <input id="player2_send_duplicate" size="5" value="2" type="text">% ·
+        <input id="player2_symmetric" checked="checked" type="checkbox">Symmetric<br>
+
+        <span id="player2_recv2">
+        <b>Recv</b> ·
+        Lag min = <input id="player2_recv_lag_min" size="5" value="100" type="text">ms ·
+        Lag max = <input id="player2_recv_lag_max" size="5" value="200" type="text">ms ·
+        Dropped = <input id="player2_recv_dropped" size="5" value="2" type="text">% ·
+        Correlation = <input id="player2_recv_correlation" size="5" value="75" type="text">% ·
+        Duplicate = <input id="player2_recv_duplicate" size="5" value="2" type="text">%<br>
+        </span>
+
+        <input id="player2_prediction" checked="checked" type="checkbox">Prediction ·
+        <input id="player2_reconciliation" checked="checked" type="checkbox">Reconciliation ·
+        <input id="player2_interpolation" type="checkbox">Interpolation
+    </p>
+    <canvas id="player2_canvas" width="920" height="75"></canvas>
+    <div id="player2_status" style="font-family:courier;">
+        Non-acknowledged inputs: 0</div>
+    </div>
+
+    <script src="lib/require.js" data-main="main"></script>
+
+    <br>
+    Derived from Gabriel Gambetta's <a href="http://www.gabrielgambetta.com/client-side-prediction-live-demo.html">live demo</a> and <a href="http://www.gabrielgambetta.com/client-server-game-architecture.html">article series on fast-paced multiplayer</a>.
+
+    </body>
+</html>

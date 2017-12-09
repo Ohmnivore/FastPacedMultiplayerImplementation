@@ -1,0 +1,7 @@
+{
+    "compilerOptions": {
+        "strict": true,
+        "module": "amd",
+        "outFile": "main.js"
+    }
+}
