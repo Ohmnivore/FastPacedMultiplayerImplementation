@@ -1,13 +1,22 @@
 import { Input, ServerEntityState } from "./entity";
 
-type Payload = Input | ServerEntityState[];
-
 class Message {
 
-    recvTS: number;
-    payload: Payload;
+    payload: any;
+    fromNetworkID: number;
 
-    constructor(recvTS: number, payload: Payload) {
+    constructor(payload: any, fromNetworkID: number) {
+        this.payload = payload;
+        this.fromNetworkID = fromNetworkID;
+    }
+}
+
+class TimedMessage {
+
+    recvTS: number;
+    payload: Message;
+
+    constructor(recvTS: number, payload: Message) {
         this.recvTS = recvTS;
         this.payload = payload;
     }
@@ -48,23 +57,23 @@ export class NetworkState {
 
 export class LagNetwork {
 
-    protected messages: Array<Message> = [];
+    protected messages: Array<TimedMessage> = [];
 
-    send(state: NetworkState, message: Payload) {
+    send(state: NetworkState, payload: any, fromNetworkID: number) {
         if (!state.shouldDrop()) {
-            this.directSend(new Message(+new Date() + state.randomLag(), message));
+            this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
 
             if (state.shouldDuplicate()) {
-                this.directSend(new Message(+new Date() + state.randomLag(), message));
+                this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
             }
         }
     }
 
-    protected directSend(message: Message) {
+    protected directSend(message: TimedMessage) {
         this.messages.push(message);
     }
 
-    receive(): Payload | undefined {
+    receive(): Message | undefined {
         let now = +new Date();
         for (let i = 0; i < this.messages.length; i++) {
             let message = this.messages[i];

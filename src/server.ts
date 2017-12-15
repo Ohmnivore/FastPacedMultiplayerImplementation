@@ -3,6 +3,7 @@ import { LagNetwork } from "./lagNetwork";
 import { Client } from "./client";
 import { renderWorld } from "./render";
 import { Host } from "./host";
+import { NetMessage, NetMessageType } from "./netlib/host";
 
 export class Server extends Host {
 
@@ -18,6 +19,10 @@ export class Server extends Host {
     }
 
     connect(client: Client) {
+        // Connect netlibs
+        client.netHost.acceptNewPeer(this.networkID);
+        this.netHost.acceptNewPeer(client.networkID);
+
         // Give the Client enough data to identify itself
         client.server = this;
         client.localEntityID = this.clients.length;
@@ -54,20 +59,22 @@ export class Server extends Host {
         // Broadcast the state to all the clients
         for (let i = 0; i < numClients; i++) {
             let client = this.clients[i];
-            client.network.send(client.recvState, worldState);
+
+            this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), client.networkID);
+            this.netHost.getSendBuffer(client.networkID).forEach(message => {
+                client.network.send(client.recvState, message, this.networkID);
+            });
         }
     }
 
     protected processInputs() {
         // Process all pending messages from clients
-        while (true) {
-            let input = this.network.receive() as Input;
-            if (!input) {
-                break;
-            }
+        let messages = this.pollMessages();
 
+        messages.forEach(message => {
+            let input = message.payload as Input;
             this.entities[input.entityID].processInput(input);
-        }
+        });
 
         // Show some info
         let info = "Last acknowledged input: ";

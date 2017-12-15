@@ -3,6 +3,7 @@ import { LagNetwork, NetworkState } from "./lagNetwork";
 import { renderWorld } from "./render";
 import { Server } from "./server";
 import { Host } from "./host";
+import { NetMessage, NetMessageType } from "./netlib/host";
 
 export class Client extends Host {
 
@@ -85,7 +86,11 @@ export class Client extends Host {
         // Send the input to the server
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
-        this.server.network.send(this.sendState, input);
+
+        this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, input), this.server.networkID);
+        this.netHost.getSendBuffer(this.server.networkID).forEach(message => {
+            this.server.network.send(this.sendState, message, this.networkID);
+        });
 
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {
@@ -99,15 +104,15 @@ export class Client extends Host {
     // Process all messages from the server, i.e. world updates
     // If enabled, do server reconciliation
     protected processServerMessages() {
-        while (true) {
-            let message = this.network.receive() as ServerEntityState[];
-            if (!message) {
-                break;
-            }
+        // Receive messages
+        let messages = this.pollMessages();
+
+        messages.forEach(message => {
+            let payload = message.payload as ServerEntityState[];
 
             // World state is a list of entity states
-            for (let i = 0; i < message.length; i++) {
-                let state = message[i];
+            for (let i = 0; i < payload.length; i++) {
+                let state = payload[i];
 
                 // If this is the first time we see this entity, create a local representation
                 if (this.entities[state.entityID] == undefined) {
@@ -129,7 +134,7 @@ export class Client extends Host {
                     this.processRemoteEntityState(this.remoteEntities[state.entityID], state);
                 }
             }
-        }
+        });
     }
 
     protected createLocalEntity(): Entity {

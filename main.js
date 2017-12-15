@@ -170,11 +170,18 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.__esModule = true;
     var Message = /** @class */ (function () {
-        function Message(recvTS, payload) {
+        function Message(payload, fromNetworkID) {
+            this.payload = payload;
+            this.fromNetworkID = fromNetworkID;
+        }
+        return Message;
+    }());
+    var TimedMessage = /** @class */ (function () {
+        function TimedMessage(recvTS, payload) {
             this.recvTS = recvTS;
             this.payload = payload;
         }
-        return Message;
+        return TimedMessage;
     }());
     var NetworkState = /** @class */ (function () {
         function NetworkState() {
@@ -210,11 +217,11 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
         function LagNetwork() {
             this.messages = [];
         }
-        LagNetwork.prototype.send = function (state, message) {
+        LagNetwork.prototype.send = function (state, payload, fromNetworkID) {
             if (!state.shouldDrop()) {
-                this.directSend(new Message(+new Date() + state.randomLag(), message));
+                this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
                 if (state.shouldDuplicate()) {
-                    this.directSend(new Message(+new Date() + state.randomLag(), message));
+                    this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
                 }
             }
         };
@@ -263,15 +270,97 @@ define("render", ["require", "exports"], function (require, exports) {
     }
     exports.renderWorld = renderWorld;
 });
-define("host", ["require", "exports", "lagNetwork"], function (require, exports, lagNetwork_1) {
+define("netlib/peer", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.__esModule = true;
+    var NetPeer = /** @class */ (function () {
+        function NetPeer() {
+            this.sendBuffer = [];
+            // Automatically assing a unique ID
+            this.id = NetPeer.curID++;
+        }
+        NetPeer.curID = 0;
+        return NetPeer;
+    }());
+    exports.NetPeer = NetPeer;
+});
+define("netlib/host", ["require", "exports", "netlib/peer"], function (require, exports, peer_1) {
+    "use strict";
+    exports.__esModule = true;
+    var NetMessageType;
+    (function (NetMessageType) {
+        NetMessageType[NetMessageType["Unreliable"] = 0] = "Unreliable";
+        NetMessageType[NetMessageType["UnreliableSequenced"] = 1] = "UnreliableSequenced";
+        NetMessageType[NetMessageType["Reliable"] = 2] = "Reliable";
+        NetMessageType[NetMessageType["ReliableOrdered"] = 3] = "ReliableOrdered";
+        NetMessageType[NetMessageType["ReliableSequenced"] = 4] = "ReliableSequenced";
+    })(NetMessageType = exports.NetMessageType || (exports.NetMessageType = {}));
+    var NetMessage = /** @class */ (function () {
+        function NetMessage(type, payload) {
+            this.type = type;
+            this.payload = payload;
+        }
+        return NetMessage;
+    }());
+    exports.NetMessage = NetMessage;
+    var NetIncomingMessage = /** @class */ (function (_super) {
+        __extends(NetIncomingMessage, _super);
+        function NetIncomingMessage(original, fromPeerID) {
+            var _this = _super.call(this, original.type, original.payload) || this;
+            _this.fromPeerID = fromPeerID;
+            return _this;
+        }
+        return NetIncomingMessage;
+    }(NetMessage));
+    exports.NetIncomingMessage = NetIncomingMessage;
+    var NetHost = /** @class */ (function () {
+        function NetHost() {
+            // Mapping peers by their networkID
+            this.peers = {};
+            this.recvBuffer = [];
+        }
+        NetHost.prototype.acceptNewPeer = function (networkID) {
+            var newPeer = new peer_1.NetPeer();
+            this.peers[networkID] = newPeer;
+            return newPeer;
+        };
+        NetHost.prototype.enqueueSend = function (msg, toNetworkID) {
+            if (msg.type == NetMessageType.Unreliable) {
+                // No extra processing required
+                this.peers[toNetworkID].sendBuffer.push(msg);
+            }
+        };
+        NetHost.prototype.enqueueRecv = function (msg, fromNetworkID) {
+            var incomingMsg = new NetIncomingMessage(msg, this.peers[fromNetworkID].id);
+            if (incomingMsg.type == NetMessageType.Unreliable) {
+                // No extra processing required
+                this.recvBuffer.push(incomingMsg);
+            }
+        };
+        NetHost.prototype.getSendBuffer = function (destNetworkID) {
+            // Returns a copy of the buffer, and empties the original buffer
+            return this.peers[destNetworkID].sendBuffer.splice(0);
+        };
+        NetHost.prototype.getRecvBuffer = function () {
+            // Returns a copy of the buffer, and empties the original buffer
+            return this.recvBuffer.splice(0);
+        };
+        return NetHost;
+    }());
+    exports.NetHost = NetHost;
+});
+define("host", ["require", "exports", "lagNetwork", "netlib/host"], function (require, exports, lagNetwork_1, host_1) {
     "use strict";
     exports.__esModule = true;
     var Host = /** @class */ (function () {
         function Host(canvas, status) {
             // Simulated network connection
+            this.netHost = new host_1.NetHost();
             this.network = new lagNetwork_1.LagNetwork();
             this.canvas = canvas;
             this.status = status;
+            // Automatically assing a unique ID
+            this.networkID = Host.curID++;
         }
         Host.prototype.setUpdateRate = function (hz) {
             this.updateRate = hz;
@@ -280,11 +369,31 @@ define("host", ["require", "exports", "lagNetwork"], function (require, exports,
         };
         Host.prototype.update = function () {
         };
+        Host.prototype.pollMessages = function () {
+            var _this = this;
+            // Get messages from LagNetwork layer
+            var messages = [];
+            while (true) {
+                var message = this.network.receive();
+                if (!message) {
+                    break;
+                }
+                messages.push(message);
+            }
+            // Pass them to our NetHost layer for processing
+            // NetHost can discard a message or put one on hold until
+            // an earlier one arrives.
+            messages.forEach(function (message) {
+                _this.netHost.enqueueRecv(message.payload, message.fromNetworkID);
+            });
+            return this.netHost.getRecvBuffer();
+        };
+        Host.curID = 0;
         return Host;
     }());
     exports.Host = Host;
 });
-define("server", ["require", "exports", "entity", "render", "host"], function (require, exports, entity_1, render_1, host_1) {
+define("server", ["require", "exports", "entity", "render", "host", "netlib/host"], function (require, exports, entity_1, render_1, host_2, host_3) {
     "use strict";
     exports.__esModule = true;
     var Server = /** @class */ (function (_super) {
@@ -299,6 +408,9 @@ define("server", ["require", "exports", "entity", "render", "host"], function (r
             return _this;
         }
         Server.prototype.connect = function (client) {
+            // Connect netlibs
+            client.netHost.acceptNewPeer(this.networkID);
+            this.netHost.acceptNewPeer(client.networkID);
             // Give the Client enough data to identify itself
             client.server = this;
             client.localEntityID = this.clients.length;
@@ -318,6 +430,7 @@ define("server", ["require", "exports", "entity", "render", "host"], function (r
         };
         // Send the world state to all the connected clients
         Server.prototype.sendWorldState = function () {
+            var _this = this;
             // Gather the state of the world. In a real app, state could be filtered to avoid leaking data
             // (e.g. position of invisible enemies).
             var worldState = [];
@@ -326,21 +439,27 @@ define("server", ["require", "exports", "entity", "render", "host"], function (r
                 var entity = this.entities[i];
                 worldState.push(entity.constructState());
             }
+            var _loop_1 = function (i) {
+                var client = this_1.clients[i];
+                this_1.netHost.enqueueSend(new host_3.NetMessage(host_3.NetMessageType.Unreliable, worldState), client.networkID);
+                this_1.netHost.getSendBuffer(client.networkID).forEach(function (message) {
+                    client.network.send(client.recvState, message, _this.networkID);
+                });
+            };
+            var this_1 = this;
             // Broadcast the state to all the clients
             for (var i = 0; i < numClients; i++) {
-                var client = this.clients[i];
-                client.network.send(client.recvState, worldState);
+                _loop_1(i);
             }
         };
         Server.prototype.processInputs = function () {
+            var _this = this;
             // Process all pending messages from clients
-            while (true) {
-                var input = this.network.receive();
-                if (!input) {
-                    break;
-                }
-                this.entities[input.entityID].processInput(input);
-            }
+            var messages = this.pollMessages();
+            messages.forEach(function (message) {
+                var input = message.payload;
+                _this.entities[input.entityID].processInput(input);
+            });
             // Show some info
             var info = "Last acknowledged input: ";
             for (var i = 0; i < this.clients.length; ++i) {
@@ -350,10 +469,10 @@ define("server", ["require", "exports", "entity", "render", "host"], function (r
             this.status.textContent = info;
         };
         return Server;
-    }(host_1.Host));
+    }(host_2.Host));
     exports.Server = Server;
 });
-define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"], function (require, exports, entity_2, lagNetwork_2, render_2, host_2) {
+define("client", ["require", "exports", "entity", "lagNetwork", "render", "host", "netlib/host"], function (require, exports, entity_2, lagNetwork_2, render_2, host_4, host_5) {
     "use strict";
     exports.__esModule = true;
     var Client = /** @class */ (function (_super) {
@@ -398,6 +517,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
         // Get inputs and send them to the server
         // If enabled, do client-side prediction
         Client.prototype.processInputs = function () {
+            var _this = this;
             // Compute delta time since last update
             var nowTS = +new Date();
             var lastTS = this.lastTS || nowTS;
@@ -418,7 +538,10 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Send the input to the server
             input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
             input.entityID = this.localEntityID;
-            this.server.network.send(this.sendState, input);
+            this.netHost.enqueueSend(new host_5.NetMessage(host_5.NetMessageType.Unreliable, input), this.server.networkID);
+            this.netHost.getSendBuffer(this.server.networkID).forEach(function (message) {
+                _this.server.network.send(_this.sendState, message, _this.networkID);
+            });
             // Do client-side prediction
             if (this.clientSidePrediction && this.localEntity != undefined) {
                 this.localEntity.applyInput(input);
@@ -429,34 +552,34 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
         // Process all messages from the server, i.e. world updates
         // If enabled, do server reconciliation
         Client.prototype.processServerMessages = function () {
-            while (true) {
-                var message = this.network.receive();
-                if (!message) {
-                    break;
-                }
+            var _this = this;
+            // Receive messages
+            var messages = this.pollMessages();
+            messages.forEach(function (message) {
+                var payload = message.payload;
                 // World state is a list of entity states
-                for (var i = 0; i < message.length; i++) {
-                    var state = message[i];
+                for (var i = 0; i < payload.length; i++) {
+                    var state = payload[i];
                     // If this is the first time we see this entity, create a local representation
-                    if (this.entities[state.entityID] == undefined) {
+                    if (_this.entities[state.entityID] == undefined) {
                         var entity = void 0;
-                        if (state.entityID == this.localEntityID) {
-                            entity = this.createLocalEntity();
+                        if (state.entityID == _this.localEntityID) {
+                            entity = _this.createLocalEntity();
                         }
                         else {
-                            entity = this.createRemoteEntity(state);
+                            entity = _this.createRemoteEntity(state);
                         }
                         entity.entityID = state.entityID;
-                        this.entities[state.entityID] = entity;
+                        _this.entities[state.entityID] = entity;
                     }
-                    if (state.entityID == this.localEntityID) {
-                        this.processLocalEntityState(this.localEntity, state);
+                    if (state.entityID == _this.localEntityID) {
+                        _this.processLocalEntityState(_this.localEntity, state);
                     }
                     else {
-                        this.processRemoteEntityState(this.remoteEntities[state.entityID], state);
+                        _this.processRemoteEntityState(_this.remoteEntities[state.entityID], state);
                     }
                 }
-            }
+            });
         };
         Client.prototype.createLocalEntity = function () {
             this.localEntity = new entity_2.LocalEntity();
@@ -498,7 +621,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             }
         };
         return Client;
-    }(host_2.Host));
+    }(host_4.Host));
     exports.Client = Client;
 });
 define("main", ["require", "exports", "client", "server"], function (require, exports, client_1, server_1) {
