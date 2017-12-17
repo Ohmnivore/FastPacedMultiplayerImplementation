@@ -6,8 +6,82 @@
     <meta name="generator" content="pandoc">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Fast-Paced Multiplayer Implementation: Smooth Client-Side Movement</title>
+    <script src="lib/Chart.min.js"></script>
 </head>
 <body>
+    <canvas id="chart_canvas" width="920" height="225"></canvas>
+    <script>
+        var ctx = document.getElementById("chart_canvas").getContext("2d");
+        var myChart = new Chart(ctx, {
+            type: "line",
+            data: {
+                datasets: [{
+                    label: "Receive",
+                    borderColor: "blue",
+                    borderWidth: 4,
+                    fill: false,
+                    data: []
+                }, {
+                    label: "Send",
+                    borderColor: "black",
+                    borderWidth: 4,
+                    fill: false,
+                    data: []
+                }]
+            },
+            options: {
+                responsive:false,
+                maintainAspectRatio: true,
+                title: {
+                    display: true,
+                    text: "Player 1 network state (press 'P' to pause)",
+                    fontSize: 18
+                },
+                legend: {
+                    labels: {
+                        fontSize: 16
+                    }
+                },
+                tooltips: {
+                    enabled: false
+                },
+                hover: {
+                    mode: null
+                },
+                animation: {
+                    duration: 0,
+                    easing: "linear"
+                },
+                scales: {
+                    xAxes: [{
+                        type: "linear",
+                        scaleLabel: {
+                            display: true,
+                            labelString: "Time (s)",
+                            fontSize: 16
+                        },
+                        ticks: {
+                            maxRotation: 0,
+                            minRotation: 0
+                        }
+                    }],
+                    yAxes: [{
+                        type: "linear",
+                        scaleLabel: {
+                            display: true,
+                            labelString: "Latency (ms)",
+                            fontSize: 16
+                        },
+                        ticks: {
+                            suggestedMin: 0,
+                            suggestedMax: 200
+                        }
+                    }]
+                }
+            }
+        });
+    </script>
+
     <div style="border: 5px solid blue; padding: 15px;">
         <p>
             <b>Player 1 view</b> - move with LEFT and RIGHT arrow keys<br>

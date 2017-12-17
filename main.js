@@ -170,7 +170,8 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.__esModule = true;
     var Message = /** @class */ (function () {
-        function Message(recvTS, payload) {
+        function Message(senderID, recvTS, payload) {
+            this.senderID = senderID;
             this.recvTS = recvTS;
             this.payload = payload;
         }
@@ -209,28 +210,74 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
     var LagNetwork = /** @class */ (function () {
         function LagNetwork() {
             this.messages = [];
+            // Unique ID per object, auto-incremented
+            this.id = 0;
+            this.logSenderIDFilter = [];
+            this.logPaused = false;
+            this.logSecondsShown = 2.0;
+            this.logStartTime = +new Date();
+            this.id = LagNetwork.curID++;
         }
-        LagNetwork.prototype.send = function (state, message) {
+        LagNetwork.prototype.send = function (state, message, senderID) {
             if (!state.shouldDrop()) {
-                this.directSend(new Message(+new Date() + state.randomLag(), message));
+                this.directSend(new Message(senderID, +new Date() + state.randomLag(), message));
                 if (state.shouldDuplicate()) {
-                    this.directSend(new Message(+new Date() + state.randomLag(), message));
+                    this.directSend(new Message(senderID, +new Date() + state.randomLag(), message));
                 }
             }
         };
         LagNetwork.prototype.directSend = function (message) {
+            message.sendTS = +new Date();
             this.messages.push(message);
+        };
+        // For logging
+        LagNetwork.prototype.addLogChartPoint = function (message, now) {
+            if (this.logChart != undefined && !this.logPaused) {
+                var relTime = (message.sendTS - this.logStartTime) / 1000.0; // In seconds
+                var deltaTime = now - message.sendTS; // In milliseconds
+                var data = this.logChart.config.data.datasets[this.logChartDatasetIdx].data;
+                // Remove points that aren't visible on the graph anymore
+                for (var i = 0; i < data.length; ++i) {
+                    var point = data[i];
+                    // Add 2.0 to logSecondsShown to account for the duration of the animations
+                    if (point.x < (now - this.logStartTime) / 1000.0 - (this.logSecondsShown + 2.0)) {
+                        data.splice(i, 1);
+                    }
+                    else {
+                        break;
+                    }
+                }
+                // Filter by sender ID
+                if (this.logSenderIDFilter.lastIndexOf(message.senderID) < 0) {
+                    return;
+                }
+                // Add new point
+                data.push({ x: relTime, y: deltaTime });
+            }
+        };
+        // For logging
+        LagNetwork.prototype.updateLogChart = function (now) {
+            if (this.logChart != undefined && !this.logPaused) {
+                var relTime = (now - this.logStartTime) / 1000.0; // In seconds
+                // Scroll the X axis to the right
+                this.logChart.config.options.scales.xAxes[0].ticks.min = relTime - this.logSecondsShown - 1.0;
+                this.logChart.config.options.scales.xAxes[0].ticks.max = relTime - 1.0;
+                this.logChart.update();
+            }
         };
         LagNetwork.prototype.receive = function () {
             var now = +new Date();
             for (var i = 0; i < this.messages.length; i++) {
                 var message = this.messages[i];
                 if (message.recvTS <= now) {
+                    this.addLogChartPoint(message, now);
                     this.messages.splice(i, 1);
                     return message.payload;
                 }
             }
+            this.updateLogChart(now);
         };
+        LagNetwork.curID = 0;
         return LagNetwork;
     }());
     exports.LagNetwork = LagNetwork;
@@ -329,7 +376,7 @@ define("server", ["require", "exports", "entity", "render", "host"], function (r
             // Broadcast the state to all the clients
             for (var i = 0; i < numClients; i++) {
                 var client = this.clients[i];
-                client.network.send(client.recvState, worldState);
+                client.network.send(client.recvState, worldState, this.network.id);
             }
         };
         Server.prototype.processInputs = function () {
@@ -418,7 +465,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Send the input to the server
             input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
             input.entityID = this.localEntityID;
-            this.server.network.send(this.sendState, input);
+            this.server.network.send(this.sendState, input, this.network.id);
             // Do client-side prediction
             if (this.clientSidePrediction && this.localEntity != undefined) {
                 this.localEntity.applyInput(input);
@@ -518,6 +565,12 @@ define("main", ["require", "exports", "client", "server"], function (require, ex
     // Setup keyboard input
     document.body.onkeydown = keyHandler;
     document.body.onkeyup = keyHandler;
+    player1.network.logChart = myChart;
+    player1.network.logChartDatasetIdx = 0;
+    player1.network.logSenderIDFilter.push(server.network.id);
+    server.network.logChart = myChart;
+    server.network.logChartDatasetIdx = 1;
+    server.network.logSenderIDFilter.push(player1.network.id);
     ///////////////////////////////////////////////////////////////////////////////
     // Helpers
     function element(id) {
@@ -618,6 +671,10 @@ define("main", ["require", "exports", "client", "server"], function (require, ex
         }
         else if (e.key == "a") {
             player2.keyLeft = (e.type == "keydown");
+        }
+        else if (e.key == "p" && e.type == "keydown") {
+            player1.network.logPaused = !player1.network.logPaused;
+            server.network.logPaused = !server.network.logPaused;
         }
     }
 });

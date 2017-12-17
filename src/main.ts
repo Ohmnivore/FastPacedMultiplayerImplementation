@@ -20,6 +20,15 @@ setOnChangeListeners();
 document.body.onkeydown = keyHandler;
 document.body.onkeyup = keyHandler;
 
+// Chart
+declare var myChart: any;
+player1.network.logChart = myChart;
+player1.network.logChartDatasetIdx = 0;
+player1.network.logSenderIDFilter.push(server.network.id);
+server.network.logChart = myChart;
+server.network.logChartDatasetIdx = 1;
+server.network.logSenderIDFilter.push(player1.network.id);
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -135,5 +144,9 @@ function keyHandler(e: KeyboardEvent) {
     }
     else if (e.key == "a") {
         player2.keyLeft = (e.type == "keydown");
+    }
+    else if (e.key == "p" && e.type == "keydown") {
+        player1.network.logPaused = !player1.network.logPaused;
+        server.network.logPaused = !server.network.logPaused;
     }
 }

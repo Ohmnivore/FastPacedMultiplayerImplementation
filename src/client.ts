@@ -85,7 +85,7 @@ export class Client extends Host {
         // Send the input to the server
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
-        this.server.network.send(this.sendState, input);
+        this.server.network.send(this.sendState, input, this.network.id);
 
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {

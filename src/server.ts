@@ -54,7 +54,7 @@ export class Server extends Host {
         // Broadcast the state to all the clients
         for (let i = 0; i < numClients; i++) {
             let client = this.clients[i];
-            client.network.send(client.recvState, worldState);
+            client.network.send(client.recvState, worldState, this.network.id);
         }
     }
 
