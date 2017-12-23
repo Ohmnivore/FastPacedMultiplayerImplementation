@@ -33,7 +33,7 @@ export class Server extends Host {
         entity.x = spawnPoints[client.localEntityID];
     }
 
-    protected update() {
+    update() {
         this.processInputs();
         this.sendWorldState();
         renderWorld(this.canvas, this.entities);

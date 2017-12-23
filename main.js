@@ -270,13 +270,25 @@ define("host", ["require", "exports", "lagNetwork"], function (require, exports,
         function Host(canvas, status) {
             // Simulated network connection
             this.network = new lagNetwork_1.LagNetwork();
+            this.loopElapsed = 0.0;
             this.canvas = canvas;
             this.status = status;
         }
         Host.prototype.setUpdateRate = function (hz) {
             this.updateRate = hz;
-            clearInterval(this.updateInterval);
-            this.updateInterval = setInterval((function (self) { return function () { self.update(); }; })(this), 1000 / this.updateRate);
+            // Fallback to setInterval if this better timing feature is unavailable
+            if (window.requestAnimationFrame == undefined) {
+                clearInterval(this.updateInterval);
+                this.updateInterval = setInterval((function (self) { return function () { self.update(); }; })(this), 1000 / this.updateRate);
+            }
+        };
+        Host.prototype.loop = function (delta) {
+            this.loopElapsed += delta;
+            var updateDuration = 1000.0 / this.updateRate; // In ms
+            if (this.loopElapsed >= updateDuration) {
+                this.update();
+                this.loopElapsed -= updateDuration;
+            }
         };
         Host.prototype.update = function () {
         };
@@ -372,8 +384,9 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             _this.clientSidePrediction = false;
             _this.serverReconciliation = false;
             _this.entityInterpolation = true;
-            // Update rate
-            _this.setUpdateRate(50);
+            _this.fps = 0;
+            // Update rate in case of setInterval fallback
+            _this.setUpdateRate(60);
             return _this;
         }
         // Update Client state
@@ -392,7 +405,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Render the World
             render_2.renderWorld(this.canvas, this.entities);
             // Show some info
-            var info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
+            var info = "FPS: " + Math.floor(this.fps) + " · Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
             this.status.textContent = info;
         };
         // Get inputs and send them to the server
@@ -403,6 +416,9 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             var lastTS = this.lastTS || nowTS;
             var dtSec = (nowTS - lastTS) / 1000.0;
             this.lastTS = nowTS;
+            if (dtSec > 0.0) {
+                this.fps = this.fps * 0.6 + 0.4 * (1.0 / dtSec);
+            }
             // Package player's input
             var input = new entity_2.Input();
             if (this.keyRight) {
@@ -518,6 +534,25 @@ define("main", ["require", "exports", "client", "server"], function (require, ex
     // Setup keyboard input
     document.body.onkeydown = keyHandler;
     document.body.onkeyup = keyHandler;
+    // requestAnimationFrame loop synced to refresh rate - if available
+    var oldTimeStamp = undefined;
+    function loop(timeStamp) {
+        if (oldTimeStamp == undefined) {
+            oldTimeStamp = timeStamp;
+        }
+        var delta = (timeStamp - oldTimeStamp);
+        // The server has configurable FPS, so use an FPS limiter
+        server.loop(delta);
+        // Players update at the browser sync rate instead
+        player1.update();
+        player2.update();
+        oldTimeStamp = timeStamp;
+        window.requestAnimationFrame(loop);
+    }
+    // If unavailable, we will fallback to setInterval in Host.setUpdateRate()
+    if (window.requestAnimationFrame != undefined) {
+        window.requestAnimationFrame(loop);
+    }
     ///////////////////////////////////////////////////////////////////////////////
     // Helpers
     function element(id) {

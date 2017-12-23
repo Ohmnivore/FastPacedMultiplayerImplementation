@@ -9,6 +9,7 @@ export class Host {
     updateRate: number;
     protected updateInterval: number;
     protected lastTS: number;
+    protected loopElapsed: number = 0.0;
 
     // UI
     protected canvas: HTMLCanvasElement;
@@ -22,14 +23,27 @@ export class Host {
     setUpdateRate(hz: number) {
         this.updateRate = hz;
 
-        clearInterval(this.updateInterval);
-        this.updateInterval = setInterval(
-                (function(self) { return function() { self.update(); }; })(this),
-                1000 / this.updateRate
-            );
+        // Fallback to setInterval if this better timing feature is unavailable
+        if (window.requestAnimationFrame == undefined) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = setInterval(
+                    (function(self) { return function() { self.update(); }; })(this),
+                    1000 / this.updateRate
+                );
+        }
     }
 
-    protected update() {
+    loop(delta: number) {
+        this.loopElapsed += delta;
+        let updateDuration = 1000.0 / this.updateRate; // In ms
+
+        if (this.loopElapsed >= updateDuration) {
+            this.update();
+            this.loopElapsed -= updateDuration;
+        }
+    }
+
+    update() {
         
     }
 }

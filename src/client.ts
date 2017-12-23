@@ -28,15 +28,17 @@ export class Client extends Host {
     serverReconciliation: boolean = false;
     entityInterpolation: boolean = true;
 
+    fps: number = 0;
+
     constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
         super(canvas, status);
 
-        // Update rate
-        this.setUpdateRate(50);
+        // Update rate in case of setInterval fallback
+        this.setUpdateRate(60);
     }
 
     // Update Client state
-    protected update() {
+    update() {
         // Listen to the server
         this.processServerMessages();
 
@@ -56,7 +58,7 @@ export class Client extends Host {
         renderWorld(this.canvas, this.entities);
 
         // Show some info
-        let info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
+        let info = "FPS: " + Math.floor(this.fps) + " · Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
         this.status.textContent = info;
     }
 
@@ -68,6 +70,9 @@ export class Client extends Host {
         let lastTS = this.lastTS || nowTS;
         let dtSec = (nowTS - lastTS) / 1000.0;
         this.lastTS = nowTS;
+        if (dtSec > 0.0) {
+            this.fps = this.fps * 0.6 + 0.4 * (1.0 / dtSec);
+        }
 
         // Package player's input
         let input = new Input();

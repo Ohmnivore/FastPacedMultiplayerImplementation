@@ -20,6 +20,32 @@ setOnChangeListeners();
 document.body.onkeydown = keyHandler;
 document.body.onkeyup = keyHandler;
 
+// requestAnimationFrame loop synced to refresh rate - if available
+let oldTimeStamp: any = undefined;
+
+function loop(timeStamp: any) {
+    if (oldTimeStamp == undefined) {
+        oldTimeStamp = timeStamp;
+    }
+
+    let delta = (timeStamp - oldTimeStamp) as number;
+
+    // The server has configurable FPS, so use an FPS limiter
+    server.loop(delta);
+
+    // Players update at the browser sync rate instead
+    player1.update();
+    player2.update();
+
+    oldTimeStamp = timeStamp;
+    window.requestAnimationFrame(loop);
+}
+
+// If unavailable, we will fallback to setInterval in Host.setUpdateRate()
+if (window.requestAnimationFrame != undefined) {
+    window.requestAnimationFrame(loop);
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helpers
