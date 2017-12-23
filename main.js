@@ -270,11 +270,61 @@ define("render", ["require", "exports"], function (require, exports) {
     }
     exports.renderWorld = renderWorld;
 });
-define("netlib/peer", ["require", "exports"], function (require, exports) {
+// Can be done as a bitmask instead, but this way is simpler.
+define("netlib/slidingBuffer", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.__esModule = true;
+    var SlidingBuffer = /** @class */ (function () {
+        function SlidingBuffer(maxLength, defaultValue) {
+            if (maxLength === void 0) { maxLength = 32; }
+            if (defaultValue === void 0) { defaultValue = true; }
+            this.latestID = -1;
+            this.maxLength = 32;
+            this.defaultValue = true;
+            this.buffer = [];
+            this.maxLength = maxLength;
+            this.defaultValue = defaultValue;
+        }
+        SlidingBuffer.prototype.set = function (id) {
+            var delta = this.latestID - id;
+            var idx = this.buffer.length - (this.latestID - id) - 1;
+            if (idx < 0) {
+                return;
+            }
+            if (id >= this.latestID) {
+                for (var i = 0; i < delta; ++i) {
+                    this.buffer.push(false);
+                }
+                this.buffer[this.buffer.length - 1] = true;
+                this.latestID = id;
+            }
+            else {
+                this.buffer[idx] = true;
+            }
+        };
+        SlidingBuffer.prototype.isSet = function (id) {
+            if (id > this.latestID) {
+                return false;
+            }
+            var idx = this.buffer.length - (this.latestID - id) - 1;
+            if (idx < 0) {
+                return this.defaultValue;
+            }
+            return this.buffer[idx];
+        };
+        return SlidingBuffer;
+    }());
+    exports.SlidingBuffer = SlidingBuffer;
+});
+define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (require, exports, slidingBuffer_1) {
     "use strict";
     exports.__esModule = true;
     var NetPeer = /** @class */ (function () {
         function NetPeer() {
+            // To allow other peers to detect duplicates
+            this.msgSeqID = 0;
+            // The received seqIDs from this peer
+            this.recvSeqIDs = new slidingBuffer_1.SlidingBuffer(128, true);
             this.sendBuffer = [];
             // Automatically assing a unique ID
             this.id = NetPeer.curID++;
@@ -290,10 +340,8 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
     var NetMessageType;
     (function (NetMessageType) {
         NetMessageType[NetMessageType["Unreliable"] = 0] = "Unreliable";
-        NetMessageType[NetMessageType["UnreliableSequenced"] = 1] = "UnreliableSequenced";
-        NetMessageType[NetMessageType["Reliable"] = 2] = "Reliable";
-        NetMessageType[NetMessageType["ReliableOrdered"] = 3] = "ReliableOrdered";
-        NetMessageType[NetMessageType["ReliableSequenced"] = 4] = "ReliableSequenced";
+        NetMessageType[NetMessageType["Reliable"] = 1] = "Reliable";
+        NetMessageType[NetMessageType["ReliableOrdered"] = 2] = "ReliableOrdered";
     })(NetMessageType = exports.NetMessageType || (exports.NetMessageType = {}));
     var NetMessage = /** @class */ (function () {
         function NetMessage(type, payload) {
@@ -307,6 +355,7 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
         __extends(NetIncomingMessage, _super);
         function NetIncomingMessage(original, fromPeerID) {
             var _this = _super.call(this, original.type, original.payload) || this;
+            _this.seqID = original.seqID;
             _this.fromPeerID = fromPeerID;
             return _this;
         }
@@ -325,13 +374,22 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
             return newPeer;
         };
         NetHost.prototype.enqueueSend = function (msg, toNetworkID) {
+            var peer = this.peers[toNetworkID];
+            msg.seqID = peer.msgSeqID++;
             if (msg.type == NetMessageType.Unreliable) {
                 // No extra processing required
-                this.peers[toNetworkID].sendBuffer.push(msg);
+                peer.sendBuffer.push(msg);
             }
         };
         NetHost.prototype.enqueueRecv = function (msg, fromNetworkID) {
-            var incomingMsg = new NetIncomingMessage(msg, this.peers[fromNetworkID].id);
+            var peer = this.peers[fromNetworkID];
+            var incomingMsg = new NetIncomingMessage(msg, peer.id);
+            if (peer.recvSeqIDs.isSet(incomingMsg.seqID)) {
+                return; // This is a duplicate message, discard it
+            }
+            else {
+                peer.recvSeqIDs.set(incomingMsg.seqID);
+            }
             if (incomingMsg.type == NetMessageType.Unreliable) {
                 // No extra processing required
                 this.recvBuffer.push(incomingMsg);

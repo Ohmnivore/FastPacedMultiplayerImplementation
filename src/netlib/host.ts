@@ -3,16 +3,15 @@ import { NetPeer } from "./peer";
 export enum NetMessageType {
 
     Unreliable,
-    UnreliableSequenced,
     Reliable,
-    ReliableOrdered,
-    ReliableSequenced
+    ReliableOrdered
 }
 
 export class NetMessage {
 
     type: NetMessageType;
     payload: any;
+    seqID: number;
 
     constructor(type: NetMessageType, payload: any) {
         this.type = type;
@@ -26,6 +25,8 @@ export class NetIncomingMessage extends NetMessage {
 
     constructor(original: NetMessage, fromPeerID: number) {
         super(original.type, original.payload);
+        this.seqID = original.seqID;
+
         this.fromPeerID = fromPeerID;
     }
 }
@@ -44,14 +45,25 @@ export class NetHost {
     }
 
     enqueueSend(msg: NetMessage, toNetworkID: number) {
+        let peer = this.peers[toNetworkID];
+        msg.seqID = peer.msgSeqID++;
+
         if (msg.type == NetMessageType.Unreliable) {
             // No extra processing required
-            this.peers[toNetworkID].sendBuffer.push(msg);
+            peer.sendBuffer.push(msg);
         }
     }
 
     enqueueRecv(msg: NetMessage, fromNetworkID: number) {
-        let incomingMsg = new NetIncomingMessage(msg, this.peers[fromNetworkID].id);
+        let peer = this.peers[fromNetworkID];
+        let incomingMsg = new NetIncomingMessage(msg, peer.id);
+
+        if (peer.recvSeqIDs.isSet(incomingMsg.seqID)) {
+            return; // This is a duplicate message, discard it
+        }
+        else {
+            peer.recvSeqIDs.set(incomingMsg.seqID);
+        }
 
         if (incomingMsg.type == NetMessageType.Unreliable) {
             // No extra processing required
