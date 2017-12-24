@@ -93,7 +93,7 @@ export class Client extends Host {
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
 
-        this.netHost.enqueueSend(new NetMessage(NetMessageType.Reliable, input), this.server.networkID);
+        this.netHost.enqueueSend(new NetMessage(NetMessageType.ReliableOrdered, input), this.server.networkID);
 
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {

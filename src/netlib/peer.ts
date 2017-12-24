@@ -38,9 +38,9 @@ export class NetPeer {
     relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(256, (idx: number) => false);
 
     // Packets are re-ordered here
-    relRecvOrderMsgs: SlidingArrayBuffer<NetIncomingMessage> = new SlidingArrayBuffer(1024, (idx: number): (NetIncomingMessage | undefined) => undefined);
-    relRecvOrderMissing: number = 0;
+    relRecvOrderMsgs: SlidingArrayBuffer<NetIncomingMessage> = new SlidingArrayBuffer(2048, (idx: number): (NetIncomingMessage | undefined) => undefined);
     relRecvOrderStartSeqID: number = 0;
+    relOrderSeqID: number = 0;
 
     // Flag indicates if this peer was sent a reliable message this frame
     relSent: boolean = false;

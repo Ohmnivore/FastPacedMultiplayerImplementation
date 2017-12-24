@@ -23,6 +23,7 @@ export class NetMessage {
 export class NetReliableMessage extends NetMessage {
 
     relSeqID: number;
+    relOrderSeqID: number;
     relRecvLatestID: number;
     relRecvBuffer: Array<boolean>;
 
@@ -48,6 +49,8 @@ export class NetIncomingMessage extends NetMessage {
 
 export class NetHost {
 
+    debug: boolean = false;
+
     // Mapping peers by their networkID
     peers: { [Key: number]: NetPeer } = {};
 
@@ -68,13 +71,18 @@ export class NetHost {
             peer.sendBuffer.push(msg);
         }
         else {
-            // Create and store a reliable message
+            // Create a reliable message
             let reliableMsg = new NetReliableMessage(msg, peer.relSeqID++);
-            peer.relSentMsgs.set(reliableMsg.seqID, new StoredNetReliableMessage(reliableMsg));
+            if (reliableMsg.type == NetMessageType.ReliableOrdered) {
+                reliableMsg.relOrderSeqID = peer.relOrderSeqID++;
+            }
 
             // Attach our acks
             reliableMsg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
             reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
+
+            // Store message
+            peer.relSentMsgs.set(reliableMsg.seqID, new StoredNetReliableMessage(reliableMsg));
 
             // Enqueue
             peer.sendBuffer.push(reliableMsg);
@@ -116,8 +124,25 @@ export class NetHost {
             }
             else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
                 // Store in queue
-                if (!peer.relRecvOrderMsgs.isTooOld(reliableMsg.relSeqID)) {
+                if (!peer.relRecvOrderMsgs.isTooOld(reliableMsg.relOrderSeqID)) {
+                    peer.relRecvOrderMsgs.set(reliableMsg.relOrderSeqID, incomingMsg);
+                }
 
+                let currentLatestSeqID = peer.relRecvOrderMsgs.getLatestID();
+
+                for (let seq = peer.relRecvOrderStartSeqID; seq <= currentLatestSeqID; ++seq) {
+                    if (peer.relRecvOrderMsgs.isTooOld(seq)) {
+                        break;
+                    }
+
+                    let msg = peer.relRecvOrderMsgs.get(seq);
+
+                    if (msg == undefined) {
+                        break;
+                    }
+
+                    this.recvBuffer.push(msg);
+                    peer.relRecvOrderStartSeqID++;
                 }
             }
             else {
@@ -146,18 +171,14 @@ export class NetHost {
                         if (toResend == undefined) {
                             // Ignore
                         }
-                        else if (!toResend.resent) {
-                            // Resend
-
+                        else {
                             // Attach our acks
                             toResend.msg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
                             toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
 
                             // Enqueue
                             peer.sendBuffer.push(toResend.msg);
-                            // peer.relSent = true;
-
-                            // toResend.resent = true;
+                            peer.relSent = true;
                         }
                     }
                 }

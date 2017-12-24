@@ -32,6 +32,14 @@ export class NetworkState {
 
     protected lastDropRoll: number = 0.0;
 
+    set(lagMin: number, lagMax: number, dropChance: number, dropCorrelation: number, duplicateChance: number) {
+        this.lagMin = lagMin;
+        this.lagMax = lagMax;
+        this.dropChance = dropChance;
+        this.dropCorrelation = dropCorrelation;
+        this.duplicateChance = duplicateChance;
+    }
+
     copyFrom(src: NetworkState) {
         this.lagMin = src.lagMin;
         this.lagMax = src.lagMax;
