@@ -18,7 +18,7 @@ export class Host {
     protected canvas: HTMLCanvasElement;
     protected status: HTMLElement;
 
-    constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
+    initialize(canvas: HTMLCanvasElement, status: HTMLElement) {
         this.canvas = canvas;
         this.status = status;
 
@@ -36,15 +36,15 @@ export class Host {
             );
     }
 
-    protected update() {
+    update() {
         
     }
 
-    protected pollMessages(): Array<NetIncomingMessage> {
+    protected pollMessages(timestamp: number): Array<NetIncomingMessage> {
         // Get messages from LagNetwork layer
         let messages = [];
         while (true) {
-            let message = this.network.receive();
+            let message = this.network.receive(timestamp);
             if (!message) {
                 break;
             }

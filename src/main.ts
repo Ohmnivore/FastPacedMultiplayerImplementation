@@ -1,5 +1,6 @@
 import { Client } from "./client";
 import { Server } from "./server";
+import { TestServer, TestClient } from "./netlibTest";
 
 // Setup a server, the player's client, and another player
 let server = new Server(element("server_canvas") as HTMLCanvasElement, element("server_status"));
@@ -19,6 +20,43 @@ setOnChangeListeners();
 // Setup keyboard input
 document.body.onkeydown = keyHandler;
 document.body.onkeyup = keyHandler;
+
+///////////////////////////////////////////////////////////////////////////////
+// Netlib test
+
+// Initialize
+let testServer = new TestServer(10);
+let testClient = new TestClient(60);
+testServer.connect(testClient);
+
+// Set network states
+TestClient.setNetworkState(testClient.sendState, 100, 200, 0.5, 0.4, 1);
+TestClient.setNetworkState(testClient.recvState, 100, 200, 0.5, 0.4, 1);
+
+// Simulate
+let curTime = 0.0;
+let maxTime = 600.0;
+let extraTime = 15.0;
+for (let curTime = 0.0; curTime < maxTime + extraTime; curTime += 1.0 / 60.0) {
+    testServer.fps.update(curTime);
+    testClient.fps.update(curTime);
+
+    if (testServer.fps.getShouldStep()) {
+        testServer.update();
+    }
+    if (testClient.fps.getShouldStep()) {
+        testClient.update();
+    }
+
+    // Let in-flight packets arrive, and give
+    // the reliability protocol some time to re-send
+    if (curTime >= maxTime) {
+        testServer.keepSending = false;
+    }
+}
+
+console.log("sent: " + testServer.seqIDs.length);
+console.log("received: " + testClient.seqIDs.length);
 
 
 ///////////////////////////////////////////////////////////////////////////////

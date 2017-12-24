@@ -59,12 +59,12 @@ export class LagNetwork {
 
     protected messages: Array<TimedMessage> = [];
 
-    send(state: NetworkState, payload: any, fromNetworkID: number) {
+    send(timestamp: number, state: NetworkState, payload: any, fromNetworkID: number) {
         if (!state.shouldDrop()) {
-            this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
+            this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
 
             if (state.shouldDuplicate()) {
-                this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
+                this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
             }
         }
     }
@@ -73,12 +73,11 @@ export class LagNetwork {
         this.messages.push(message);
     }
 
-    receive(): Message | undefined {
-        let now = +new Date();
+    receive(timestamp: number): Message | undefined {
         for (let i = 0; i < this.messages.length; i++) {
             let message = this.messages[i];
             
-            if (message.recvTS <= now) {
+            if (message.recvTS <= timestamp) {
                 this.messages.splice(i, 1);
                 return message.payload;
             }

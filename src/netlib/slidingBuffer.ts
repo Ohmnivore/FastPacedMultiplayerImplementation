@@ -1,49 +1,58 @@
-// Can be done as a bitmask instead, but this way is simpler.
+// Circular buffer
+export class SlidingArrayBuffer<T> {
 
-export class SlidingBuffer {
+    protected latestID: number = -1;
+    protected maxSize: number;
+    protected buffer: Array<T | undefined> = [];
+    protected fillFunction: (idx: number) => (T | undefined);
 
-    latestID: number = -1;
-    maxLength: number = 32;
-    defaultValue: boolean = true;
-    protected buffer: Array<boolean> = [];
+    constructor(maxSize: number = 32, fillFunction: (idx: number) => (T | undefined)) {
+        this.maxSize = maxSize;
+        this.fillFunction = fillFunction;
 
-    constructor(maxLength: number = 32, defaultValue: boolean = true) {
-        this.maxLength = maxLength;
-        this.defaultValue = defaultValue;
+        for (let idx = 0; idx < this.maxSize; ++idx) {
+            this.buffer.push(fillFunction(idx));
+        }
     }
 
-    set(id: number) {
-        let delta = this.latestID - id;
-        let idx = this.buffer.length - (this.latestID - id) - 1;
+    getLatestID(): number {
+        return this.latestID;
+    }
 
-        if (idx < 0) {
-            return;
-        }
+    getMaxSize(): number {
+        return this.maxSize;
+    }
 
-        if (id >= this.latestID) {
-            for (let i = 0; i < delta; ++i) {
-                this.buffer.push(false);
+    set(id: number, value: T) {
+        if (id > this.latestID) {
+            // Reset the values that just went from tail to head
+            for (let seq = this.latestID + 1; seq <= id; ++seq) {
+                let idx = seq % this.maxSize;
+                this.buffer[idx] = this.fillFunction(seq);
             }
 
-            this.buffer[this.buffer.length - 1] = true;
+            // Update the most recently sent ID
             this.latestID = id;
         }
-        else {
-            this.buffer[idx] = true;
-        }
+
+        let idx = id % this.maxSize;
+        this.buffer[idx] = value;
     }
 
-    isSet(id: number) {
-        if (id > this.latestID) {
-            return false;
-        }
+    isNew(id: number): boolean {
+        return id > this.latestID;
+    }
 
-        let idx = this.buffer.length - (this.latestID - id) - 1;
-        
-        if (idx < 0) {
-            return this.defaultValue;
-        }
+    isTooOld(id: number): boolean {
+        return this.latestID - id >= this.maxSize;
+    }
 
+    get(id: number): T | undefined {
+        let idx = id % this.maxSize;
         return this.buffer[idx];
+    }
+
+    cloneBuffer(): Array<T | undefined> {
+        return this.buffer.slice(0);
     }
 }

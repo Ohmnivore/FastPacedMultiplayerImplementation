@@ -12,7 +12,8 @@ export class Server extends Host {
     protected entities: ServerEntities = {};
 
     constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
-        super(canvas, status);
+        super();
+        this.initialize(canvas, status);
 
         // Default update rate
         this.setUpdateRate(10);
@@ -38,7 +39,7 @@ export class Server extends Host {
         entity.x = spawnPoints[client.localEntityID];
     }
 
-    protected update() {
+    update() {
         this.processInputs();
         this.sendWorldState();
         renderWorld(this.canvas, this.entities);
@@ -62,14 +63,14 @@ export class Server extends Host {
 
             this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), client.networkID);
             this.netHost.getSendBuffer(client.networkID).forEach(message => {
-                client.network.send(client.recvState, message, this.networkID);
+                client.network.send(+new Date(), client.recvState, message, this.networkID);
             });
         }
     }
 
     protected processInputs() {
         // Process all pending messages from clients
-        let messages = this.pollMessages();
+        let messages = this.pollMessages(+new Date());
 
         messages.forEach(message => {
             let input = message.payload as Input;

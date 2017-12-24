@@ -217,22 +217,21 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
         function LagNetwork() {
             this.messages = [];
         }
-        LagNetwork.prototype.send = function (state, payload, fromNetworkID) {
+        LagNetwork.prototype.send = function (timestamp, state, payload, fromNetworkID) {
             if (!state.shouldDrop()) {
-                this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
+                this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
                 if (state.shouldDuplicate()) {
-                    this.directSend(new TimedMessage(+new Date() + state.randomLag(), new Message(payload, fromNetworkID)));
+                    this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
                 }
             }
         };
         LagNetwork.prototype.directSend = function (message) {
             this.messages.push(message);
         };
-        LagNetwork.prototype.receive = function () {
-            var now = +new Date();
+        LagNetwork.prototype.receive = function (timestamp) {
             for (var i = 0; i < this.messages.length; i++) {
                 var message = this.messages[i];
-                if (message.recvTS <= now) {
+                if (message.recvTS <= timestamp) {
                     this.messages.splice(i, 1);
                     return message.payload;
                 }
@@ -270,61 +269,87 @@ define("render", ["require", "exports"], function (require, exports) {
     }
     exports.renderWorld = renderWorld;
 });
-// Can be done as a bitmask instead, but this way is simpler.
 define("netlib/slidingBuffer", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.__esModule = true;
-    var SlidingBuffer = /** @class */ (function () {
-        function SlidingBuffer(maxLength, defaultValue) {
-            if (maxLength === void 0) { maxLength = 32; }
-            if (defaultValue === void 0) { defaultValue = true; }
+    // Circular buffer
+    var SlidingArrayBuffer = /** @class */ (function () {
+        function SlidingArrayBuffer(maxSize, fillFunction) {
+            if (maxSize === void 0) { maxSize = 32; }
             this.latestID = -1;
-            this.maxLength = 32;
-            this.defaultValue = true;
             this.buffer = [];
-            this.maxLength = maxLength;
-            this.defaultValue = defaultValue;
-        }
-        SlidingBuffer.prototype.set = function (id) {
-            var delta = this.latestID - id;
-            var idx = this.buffer.length - (this.latestID - id) - 1;
-            if (idx < 0) {
-                return;
+            this.maxSize = maxSize;
+            this.fillFunction = fillFunction;
+            for (var idx = 0; idx < this.maxSize; ++idx) {
+                this.buffer.push(fillFunction(idx));
             }
-            if (id >= this.latestID) {
-                for (var i = 0; i < delta; ++i) {
-                    this.buffer.push(false);
+        }
+        SlidingArrayBuffer.prototype.getLatestID = function () {
+            return this.latestID;
+        };
+        SlidingArrayBuffer.prototype.getMaxSize = function () {
+            return this.maxSize;
+        };
+        SlidingArrayBuffer.prototype.set = function (id, value) {
+            if (id > this.latestID) {
+                // Reset the values that just went from tail to head
+                for (var seq = this.latestID + 1; seq <= id; ++seq) {
+                    var idx_1 = seq % this.maxSize;
+                    this.buffer[idx_1] = this.fillFunction(seq);
                 }
-                this.buffer[this.buffer.length - 1] = true;
+                // Update the most recently sent ID
                 this.latestID = id;
             }
-            else {
-                this.buffer[idx] = true;
-            }
+            var idx = id % this.maxSize;
+            this.buffer[idx] = value;
         };
-        SlidingBuffer.prototype.isSet = function (id) {
-            if (id > this.latestID) {
-                return false;
-            }
-            var idx = this.buffer.length - (this.latestID - id) - 1;
-            if (idx < 0) {
-                return this.defaultValue;
-            }
+        SlidingArrayBuffer.prototype.isNew = function (id) {
+            return id > this.latestID;
+        };
+        SlidingArrayBuffer.prototype.isTooOld = function (id) {
+            return this.latestID - id >= this.maxSize;
+        };
+        SlidingArrayBuffer.prototype.get = function (id) {
+            var idx = id % this.maxSize;
             return this.buffer[idx];
         };
-        return SlidingBuffer;
+        SlidingArrayBuffer.prototype.cloneBuffer = function () {
+            return this.buffer.slice(0);
+        };
+        return SlidingArrayBuffer;
     }());
-    exports.SlidingBuffer = SlidingBuffer;
+    exports.SlidingArrayBuffer = SlidingArrayBuffer;
 });
 define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (require, exports, slidingBuffer_1) {
     "use strict";
     exports.__esModule = true;
+    var StoredNetReliableMessage = /** @class */ (function () {
+        function StoredNetReliableMessage(msg) {
+            this.resent = false;
+            this.msg = msg;
+            this.timeSent = +new Date();
+        }
+        return StoredNetReliableMessage;
+    }());
+    exports.StoredNetReliableMessage = StoredNetReliableMessage;
     var NetPeer = /** @class */ (function () {
         function NetPeer() {
             // To allow other peers to detect duplicates
             this.msgSeqID = 0;
-            // The received seqIDs from this peer
-            this.recvSeqIDs = new slidingBuffer_1.SlidingBuffer(128, true);
+            // The received seqIDs from this peer, to detect duplicates
+            this.recvSeqIDs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return false; });
+            // Sequence number for reliability algorithm
+            this.relSeqID = 0;
+            // The reliable messages sent to this peer
+            this.relSentMsgs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return undefined; });
+            // The reliable messages received from this peer
+            this.relRecvMsgs = new slidingBuffer_1.SlidingArrayBuffer(256, function (idx) { return false; });
+            // Packets are re-ordered here
+            this.relRecvOrderMsgs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return undefined; });
+            this.relRecvOrderMissing = 0;
+            this.relRecvOrderStartSeqID = 0;
+            // Flag indicates if this peer was sent a reliable message this frame
+            this.relSent = false;
             this.sendBuffer = [];
             // Automatically assing a unique ID
             this.id = NetPeer.curID++;
@@ -342,6 +367,7 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
         NetMessageType[NetMessageType["Unreliable"] = 0] = "Unreliable";
         NetMessageType[NetMessageType["Reliable"] = 1] = "Reliable";
         NetMessageType[NetMessageType["ReliableOrdered"] = 2] = "ReliableOrdered";
+        NetMessageType[NetMessageType["ReliableHeartbeat"] = 3] = "ReliableHeartbeat";
     })(NetMessageType = exports.NetMessageType || (exports.NetMessageType = {}));
     var NetMessage = /** @class */ (function () {
         function NetMessage(type, payload) {
@@ -351,6 +377,17 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
         return NetMessage;
     }());
     exports.NetMessage = NetMessage;
+    var NetReliableMessage = /** @class */ (function (_super) {
+        __extends(NetReliableMessage, _super);
+        function NetReliableMessage(original, relSeqID) {
+            var _this = _super.call(this, original.type, original.payload) || this;
+            _this.seqID = original.seqID;
+            _this.relSeqID = relSeqID;
+            return _this;
+        }
+        return NetReliableMessage;
+    }(NetMessage));
+    exports.NetReliableMessage = NetReliableMessage;
     var NetIncomingMessage = /** @class */ (function (_super) {
         __extends(NetIncomingMessage, _super);
         function NetIncomingMessage(original, fromPeerID) {
@@ -380,24 +417,96 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                 // No extra processing required
                 peer.sendBuffer.push(msg);
             }
+            else {
+                // Create and store a reliable message
+                var reliableMsg = new NetReliableMessage(msg, peer.relSeqID++);
+                peer.relSentMsgs.set(reliableMsg.seqID, new peer_1.StoredNetReliableMessage(reliableMsg));
+                // Attach our acks
+                reliableMsg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
+                reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
+                // Enqueue
+                peer.sendBuffer.push(reliableMsg);
+                peer.relSent = true;
+            }
         };
         NetHost.prototype.enqueueRecv = function (msg, fromNetworkID) {
             var peer = this.peers[fromNetworkID];
             var incomingMsg = new NetIncomingMessage(msg, peer.id);
-            if (peer.recvSeqIDs.isSet(incomingMsg.seqID)) {
-                return; // This is a duplicate message, discard it
+            // Detect and discard duplicates
+            if (peer.recvSeqIDs.isNew(incomingMsg.seqID)) {
+                peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
             }
             else {
-                peer.recvSeqIDs.set(incomingMsg.seqID);
+                if (peer.recvSeqIDs.isTooOld(incomingMsg.seqID)) {
+                    return; // Assume that it's a duplicate message
+                }
+                if (peer.recvSeqIDs.get(incomingMsg.seqID) == true) {
+                    return; // This is a duplicate message, discard it
+                }
+                else {
+                    peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
+                }
             }
             if (incomingMsg.type == NetMessageType.Unreliable) {
                 // No extra processing required
                 this.recvBuffer.push(incomingMsg);
             }
+            else {
+                var reliableMsg = msg;
+                if (reliableMsg.type == NetMessageType.Reliable) {
+                    // Let it be received right away
+                    this.recvBuffer.push(incomingMsg);
+                }
+                else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
+                    // Store in queue
+                    if (!peer.relRecvOrderMsgs.isTooOld(reliableMsg.relSeqID)) {
+                    }
+                }
+                else {
+                    // Process heartbeat messages but don't store them
+                }
+                // Update our acks
+                if (!peer.relRecvMsgs.isTooOld(reliableMsg.relSeqID)) {
+                    peer.relRecvMsgs.set(reliableMsg.relSeqID, true);
+                }
+                // Process the peer's acks
+                var start = reliableMsg.relRecvLatestID - reliableMsg.relRecvBuffer.length + 1;
+                var end = reliableMsg.relRecvLatestID;
+                for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
+                    var idx = relSeqID % reliableMsg.relRecvBuffer.length;
+                    if (reliableMsg.relRecvBuffer[idx] == true) {
+                        // TODO: set ping
+                    }
+                    else {
+                        if (!peer.relSentMsgs.isNew(relSeqID) && !peer.relSentMsgs.isTooOld(relSeqID)) {
+                            var toResend = peer.relSentMsgs.get(relSeqID);
+                            if (toResend == undefined) {
+                                // Ignore
+                            }
+                            else if (!toResend.resent) {
+                                // Resend
+                                // Attach our acks
+                                toResend.msg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
+                                toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
+                                // Enqueue
+                                peer.sendBuffer.push(toResend.msg);
+                                // peer.relSent = true;
+                                // toResend.resent = true;
+                            }
+                        }
+                    }
+                }
+            }
         };
         NetHost.prototype.getSendBuffer = function (destNetworkID) {
+            var peer = this.peers[destNetworkID];
+            // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
+            if (!peer.relSent) {
+                this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID);
+            }
+            peer.relSent = false;
             // Returns a copy of the buffer, and empties the original buffer
-            return this.peers[destNetworkID].sendBuffer.splice(0);
+            return peer.sendBuffer.splice(0);
         };
         NetHost.prototype.getRecvBuffer = function () {
             // Returns a copy of the buffer, and empties the original buffer
@@ -411,15 +520,17 @@ define("host", ["require", "exports", "lagNetwork", "netlib/host"], function (re
     "use strict";
     exports.__esModule = true;
     var Host = /** @class */ (function () {
-        function Host(canvas, status) {
+        function Host() {
             // Simulated network connection
             this.netHost = new host_1.NetHost();
             this.network = new lagNetwork_1.LagNetwork();
+        }
+        Host.prototype.initialize = function (canvas, status) {
             this.canvas = canvas;
             this.status = status;
             // Automatically assing a unique ID
             this.networkID = Host.curID++;
-        }
+        };
         Host.prototype.setUpdateRate = function (hz) {
             this.updateRate = hz;
             clearInterval(this.updateInterval);
@@ -427,12 +538,12 @@ define("host", ["require", "exports", "lagNetwork", "netlib/host"], function (re
         };
         Host.prototype.update = function () {
         };
-        Host.prototype.pollMessages = function () {
+        Host.prototype.pollMessages = function (timestamp) {
             var _this = this;
             // Get messages from LagNetwork layer
             var messages = [];
             while (true) {
-                var message = this.network.receive();
+                var message = this.network.receive(timestamp);
                 if (!message) {
                     break;
                 }
@@ -457,10 +568,11 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
     var Server = /** @class */ (function (_super) {
         __extends(Server, _super);
         function Server(canvas, status) {
-            var _this = _super.call(this, canvas, status) || this;
+            var _this = _super.call(this) || this;
             // Connected clients and their entities
             _this.clients = [];
             _this.entities = {};
+            _this.initialize(canvas, status);
             // Default update rate
             _this.setUpdateRate(10);
             return _this;
@@ -501,7 +613,7 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
                 var client = this_1.clients[i];
                 this_1.netHost.enqueueSend(new host_3.NetMessage(host_3.NetMessageType.Unreliable, worldState), client.networkID);
                 this_1.netHost.getSendBuffer(client.networkID).forEach(function (message) {
-                    client.network.send(client.recvState, message, _this.networkID);
+                    client.network.send(+new Date(), client.recvState, message, _this.networkID);
                 });
             };
             var this_1 = this;
@@ -513,7 +625,7 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
         Server.prototype.processInputs = function () {
             var _this = this;
             // Process all pending messages from clients
-            var messages = this.pollMessages();
+            var messages = this.pollMessages(+new Date());
             messages.forEach(function (message) {
                 var input = message.payload;
                 _this.entities[input.entityID].processInput(input);
@@ -536,7 +648,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
     var Client = /** @class */ (function (_super) {
         __extends(Client, _super);
         function Client(canvas, status) {
-            var _this = _super.call(this, canvas, status) || this;
+            var _this = _super.call(this) || this;
             // Local representation of the entities
             _this.entities = {};
             _this.remoteEntities = {};
@@ -549,12 +661,14 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             _this.clientSidePrediction = false;
             _this.serverReconciliation = false;
             _this.entityInterpolation = true;
+            _this.initialize(canvas, status);
             // Update rate
             _this.setUpdateRate(50);
             return _this;
         }
         // Update Client state
         Client.prototype.update = function () {
+            var _this = this;
             // Listen to the server
             this.processServerMessages();
             if (this.localEntity == undefined) {
@@ -562,6 +676,10 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             }
             // Process inputs
             this.processInputs();
+            // Send messages
+            this.netHost.getSendBuffer(this.server.networkID).forEach(function (message) {
+                _this.server.network.send(+new Date(), _this.sendState, message, _this.networkID);
+            });
             // Interpolate other entities
             if (this.entityInterpolation) {
                 this.interpolateEntities();
@@ -575,7 +693,6 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
         // Get inputs and send them to the server
         // If enabled, do client-side prediction
         Client.prototype.processInputs = function () {
-            var _this = this;
             // Compute delta time since last update
             var nowTS = +new Date();
             var lastTS = this.lastTS || nowTS;
@@ -596,10 +713,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Send the input to the server
             input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
             input.entityID = this.localEntityID;
-            this.netHost.enqueueSend(new host_5.NetMessage(host_5.NetMessageType.Unreliable, input), this.server.networkID);
-            this.netHost.getSendBuffer(this.server.networkID).forEach(function (message) {
-                _this.server.network.send(_this.sendState, message, _this.networkID);
-            });
+            this.netHost.enqueueSend(new host_5.NetMessage(host_5.NetMessageType.Reliable, input), this.server.networkID);
             // Do client-side prediction
             if (this.clientSidePrediction && this.localEntity != undefined) {
                 this.localEntity.applyInput(input);
@@ -612,7 +726,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
         Client.prototype.processServerMessages = function () {
             var _this = this;
             // Receive messages
-            var messages = this.pollMessages();
+            var messages = this.pollMessages(+new Date());
             messages.forEach(function (message) {
                 var payload = message.payload;
                 // World state is a list of entity states
@@ -682,7 +796,122 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
     }(host_4.Host));
     exports.Client = Client;
 });
-define("main", ["require", "exports", "client", "server"], function (require, exports, client_1, server_1) {
+define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host"], function (require, exports, host_6, lagNetwork_3, host_7) {
+    "use strict";
+    exports.__esModule = true;
+    var FrameRateLimiter = /** @class */ (function () {
+        function FrameRateLimiter(frameRate) {
+            this.lastTimestampSet = false;
+            this.accumulator = 0.0;
+            this.shouldStep = false;
+            this.frameRate = frameRate;
+        }
+        FrameRateLimiter.prototype.getLastTimestamp = function () {
+            return this.lastTimestamp;
+        };
+        FrameRateLimiter.prototype.getLastTimestampAsMilliseconds = function () {
+            return Math.round(this.lastTimestamp * 1000.0);
+        };
+        FrameRateLimiter.prototype.getShouldStep = function () {
+            return this.shouldStep;
+        };
+        FrameRateLimiter.prototype.update = function (timestamp) {
+            if (!this.lastTimestampSet) {
+                this.lastTimestamp = timestamp;
+                this.lastTimestampSet = true;
+            }
+            var delta = timestamp - this.lastTimestamp;
+            this.accumulator += delta;
+            var frameDuration = 1.0 / this.frameRate;
+            if (this.accumulator >= frameDuration) {
+                this.shouldStep = true;
+                this.accumulator -= frameDuration;
+            }
+            else {
+                this.shouldStep = false;
+            }
+            this.lastTimestamp = timestamp;
+        };
+        return FrameRateLimiter;
+    }());
+    var TestServer = /** @class */ (function (_super) {
+        __extends(TestServer, _super);
+        function TestServer(fps) {
+            var _this = _super.call(this) || this;
+            // Connected clients and their entities
+            _this.clients = [];
+            _this.keepSending = true;
+            _this.seqID = 0;
+            _this.seqIDs = [];
+            _this.fps = new FrameRateLimiter(fps);
+            return _this;
+        }
+        TestServer.prototype.connect = function (client) {
+            // Connect netlibs
+            client.netHost.acceptNewPeer(this.networkID);
+            this.netHost.acceptNewPeer(client.networkID);
+            // Give the Client enough data to identify itself
+            client.server = this;
+            this.clients.push(client);
+        };
+        TestServer.prototype.update = function () {
+            var _this = this;
+            this.pollMessages(this.fps.getLastTimestampAsMilliseconds());
+            var _loop_2 = function (i) {
+                var client = this_2.clients[i];
+                if (this_2.keepSending) {
+                    var seqID = this_2.seqID++;
+                    this_2.seqIDs.push(seqID);
+                    this_2.netHost.enqueueSend(new host_7.NetMessage(host_7.NetMessageType.Reliable, seqID), client.networkID);
+                }
+                this_2.netHost.getSendBuffer(client.networkID).forEach(function (message) {
+                    client.network.send(_this.fps.getLastTimestampAsMilliseconds(), client.recvState, message, _this.networkID);
+                });
+            };
+            var this_2 = this;
+            for (var i = 0; i < this.clients.length; i++) {
+                _loop_2(i);
+            }
+        };
+        return TestServer;
+    }(host_6.Host));
+    exports.TestServer = TestServer;
+    var TestClient = /** @class */ (function (_super) {
+        __extends(TestClient, _super);
+        function TestClient(fps) {
+            var _this = _super.call(this) || this;
+            _this.sendState = new lagNetwork_3.NetworkState();
+            _this.recvState = new lagNetwork_3.NetworkState();
+            _this.seqIDs = [];
+            _this.fps = new FrameRateLimiter(fps);
+            return _this;
+        }
+        TestClient.prototype.update = function () {
+            var _this = this;
+            // Receive messages
+            var messages = this.pollMessages(this.fps.getLastTimestampAsMilliseconds());
+            messages.forEach(function (message) {
+                var payload = message.payload;
+                _this.seqIDs.push(payload);
+                console.log(payload);
+            });
+            // Send messages
+            this.netHost.getSendBuffer(this.server.networkID).forEach(function (message) {
+                _this.server.network.send(_this.fps.getLastTimestampAsMilliseconds(), _this.sendState, message, _this.networkID);
+            });
+        };
+        TestClient.setNetworkState = function (state, lagMin, lagMax, dropChance, dropCorrelation, duplicateChance) {
+            state.lagMin = lagMin;
+            state.lagMax = lagMax;
+            state.dropChance = dropChance;
+            state.dropCorrelation = dropCorrelation;
+            state.duplicateChance = duplicateChance;
+        };
+        return TestClient;
+    }(host_6.Host));
+    exports.TestClient = TestClient;
+});
+define("main", ["require", "exports", "client", "server", "netlibTest"], function (require, exports, client_1, server_1, netlibTest_1) {
     "use strict";
     exports.__esModule = true;
     // Setup a server, the player's client, and another player
@@ -699,6 +928,36 @@ define("main", ["require", "exports", "client", "server"], function (require, ex
     // Setup keyboard input
     document.body.onkeydown = keyHandler;
     document.body.onkeyup = keyHandler;
+    ///////////////////////////////////////////////////////////////////////////////
+    // Netlib test
+    // Initialize
+    var testServer = new netlibTest_1.TestServer(10);
+    var testClient = new netlibTest_1.TestClient(60);
+    testServer.connect(testClient);
+    // Set network states
+    netlibTest_1.TestClient.setNetworkState(testClient.sendState, 100, 200, 0.5, 0.4, 1);
+    netlibTest_1.TestClient.setNetworkState(testClient.recvState, 100, 200, 0.5, 0.4, 1);
+    // Simulate
+    var curTime = 0.0;
+    var maxTime = 600.0;
+    var extraTime = 15.0;
+    for (var curTime_1 = 0.0; curTime_1 < maxTime + extraTime; curTime_1 += 1.0 / 60.0) {
+        testServer.fps.update(curTime_1);
+        testClient.fps.update(curTime_1);
+        if (testServer.fps.getShouldStep()) {
+            testServer.update();
+        }
+        if (testClient.fps.getShouldStep()) {
+            testClient.update();
+        }
+        // Let in-flight packets arrive, and give
+        // the reliability protocol some time to re-send
+        if (curTime_1 >= maxTime) {
+            testServer.keepSending = false;
+        }
+    }
+    console.log("sent: " + testServer.seqIDs.length);
+    console.log("received: " + testClient.seqIDs.length);
     ///////////////////////////////////////////////////////////////////////////////
     // Helpers
     function element(id) {

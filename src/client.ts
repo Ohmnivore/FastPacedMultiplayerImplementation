@@ -30,14 +30,15 @@ export class Client extends Host {
     entityInterpolation: boolean = true;
 
     constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
-        super(canvas, status);
+        super();
+        this.initialize(canvas, status);
 
         // Update rate
         this.setUpdateRate(50);
     }
 
     // Update Client state
-    protected update() {
+    update() {
         // Listen to the server
         this.processServerMessages();
 
@@ -47,6 +48,11 @@ export class Client extends Host {
 
         // Process inputs
         this.processInputs();
+
+        // Send messages
+        this.netHost.getSendBuffer(this.server.networkID).forEach(message => {
+            this.server.network.send(+new Date(), this.sendState, message, this.networkID);
+        });
 
         // Interpolate other entities
         if (this.entityInterpolation) {
@@ -87,10 +93,7 @@ export class Client extends Host {
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
 
-        this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, input), this.server.networkID);
-        this.netHost.getSendBuffer(this.server.networkID).forEach(message => {
-            this.server.network.send(this.sendState, message, this.networkID);
-        });
+        this.netHost.enqueueSend(new NetMessage(NetMessageType.Reliable, input), this.server.networkID);
 
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {
@@ -105,7 +108,7 @@ export class Client extends Host {
     // If enabled, do server reconciliation
     protected processServerMessages() {
         // Receive messages
-        let messages = this.pollMessages();
+        let messages = this.pollMessages(+new Date());
 
         messages.forEach(message => {
             let payload = message.payload as ServerEntityState[];

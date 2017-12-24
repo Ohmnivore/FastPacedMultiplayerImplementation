@@ -1,5 +1,17 @@
-import { NetMessage } from "./host";
-import { SlidingBuffer } from "./slidingBuffer";
+import { NetMessage, NetReliableMessage, NetIncomingMessage } from "./host";
+import { SlidingArrayBuffer } from "./slidingBuffer";
+
+export class StoredNetReliableMessage {
+
+    msg: NetReliableMessage;
+    timeSent: number;
+    resent = false;
+
+    constructor(msg: NetReliableMessage) {
+        this.msg = msg;
+        this.timeSent = +new Date();
+    }
+}
 
 export class NetPeer {
 
@@ -13,8 +25,25 @@ export class NetPeer {
     // To allow other peers to detect duplicates
     msgSeqID: number = 0;
 
-    // The received seqIDs from this peer
-    recvSeqIDs: SlidingBuffer = new SlidingBuffer(128, true);
+    // The received seqIDs from this peer, to detect duplicates
+    recvSeqIDs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(1024, (idx: number) => false);
+
+    // Sequence number for reliability algorithm
+    relSeqID: number = 0;
+
+    // The reliable messages sent to this peer
+    relSentMsgs: SlidingArrayBuffer<StoredNetReliableMessage> = new SlidingArrayBuffer(1024, (idx: number): (StoredNetReliableMessage | undefined) => undefined);
+
+    // The reliable messages received from this peer
+    relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(256, (idx: number) => false);
+
+    // Packets are re-ordered here
+    relRecvOrderMsgs: SlidingArrayBuffer<NetIncomingMessage> = new SlidingArrayBuffer(1024, (idx: number): (NetIncomingMessage | undefined) => undefined);
+    relRecvOrderMissing: number = 0;
+    relRecvOrderStartSeqID: number = 0;
+
+    // Flag indicates if this peer was sent a reliable message this frame
+    relSent: boolean = false;
 
     sendBuffer: Array<NetMessage> = [];
 
