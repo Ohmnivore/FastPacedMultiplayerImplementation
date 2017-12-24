@@ -1033,7 +1033,10 @@ define("main", ["require", "exports", "client", "server", "netlibTest"], functio
     document.body.onkeyup = keyHandler;
     ///////////////////////////////////////////////////////////////////////////////
     // Netlib tests
-    netlibTest_1.TestLauncher.launchDefaultTests();
+    var testsBtn = element("tests_btn");
+    testsBtn.onclick = function () {
+        netlibTest_1.TestLauncher.launchDefaultTests();
+    };
     ///////////////////////////////////////////////////////////////////////////////
     // Helpers
     function element(id) {

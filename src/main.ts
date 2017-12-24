@@ -24,7 +24,10 @@ document.body.onkeyup = keyHandler;
 ///////////////////////////////////////////////////////////////////////////////
 // Netlib tests
 
-TestLauncher.launchDefaultTests();
+let testsBtn = element("tests_btn") as HTMLButtonElement;
+testsBtn.onclick = function() {
+    TestLauncher.launchDefaultTests();
+};
 
 
 ///////////////////////////////////////////////////////////////////////////////
