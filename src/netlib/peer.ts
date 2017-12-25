@@ -46,6 +46,7 @@ export class NetPeer {
     relSent: boolean = false;
 
     sendBuffer: Array<NetMessage> = [];
+    waitingForDisconnect: boolean = false;
 
     constructor() {
         // Automatically assing a unique ID

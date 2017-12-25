@@ -383,6 +383,7 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
             // Flag indicates if this peer was sent a reliable message this frame
             this.relSent = false;
             this.sendBuffer = [];
+            this.waitingForDisconnect = false;
             // Automatically assing a unique ID
             this.id = NetPeer.curID++;
         }
@@ -391,7 +392,7 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
     }());
     exports.NetPeer = NetPeer;
 });
-define("netlib/error", ["require", "exports"], function (require, exports) {
+define("netlib/event", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.__esModule = true;
     var NetEvent;
@@ -400,11 +401,12 @@ define("netlib/error", ["require", "exports"], function (require, exports) {
         NetEvent[NetEvent["DuplicatesBufferOverflow"] = 1] = "DuplicatesBufferOverflow";
         NetEvent[NetEvent["ReliableRecvBufferOverflow"] = 2] = "ReliableRecvBufferOverflow";
         NetEvent[NetEvent["ReliableSendBufferOverrun"] = 3] = "ReliableSendBufferOverrun";
+        NetEvent[NetEvent["DisconnectRecv"] = 4] = "DisconnectRecv";
     })(NetEvent = exports.NetEvent || (exports.NetEvent = {}));
     var NetEventUtils = /** @class */ (function () {
         function NetEventUtils() {
         }
-        NetEventUtils.getErrorString = function (error) {
+        NetEventUtils.getEventString = function (error) {
             if (error == NetEvent.DuplicatesBufferOverrun) {
                 return "Duplicates buffer overrun";
             }
@@ -414,20 +416,23 @@ define("netlib/error", ["require", "exports"], function (require, exports) {
             else if (error == NetEvent.ReliableRecvBufferOverflow) {
                 return "Reliable receive buffer overflow";
             }
-            else {
-                // NetError.ReliableSendBufferOverrun
+            else if (error == NetEvent.ReliableSendBufferOverrun) {
                 return "Reliable send buffer overrun";
+            }
+            else {
+                // NetEvent.DisconnectRecv
+                return "Disconnect request received";
             }
         };
         NetEventUtils.defaultHandler = function (host, peer, error, msg) {
-            console.log("netlib error: [" + NetEventUtils.getErrorString(error) + "] on peer [" + peer.id + "]");
+            console.log("netlib error: [" + NetEventUtils.getEventString(error) + "] on peer [" + peer.id + "]");
             host.disconnectPeer(peer.id);
         };
         return NetEventUtils;
     }());
     exports.NetEventUtils = NetEventUtils;
 });
-define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], function (require, exports, peer_1, error_1) {
+define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], function (require, exports, peer_1, event_1) {
     "use strict";
     exports.__esModule = true;
     var NetMessageType;
@@ -436,6 +441,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
         NetMessageType[NetMessageType["Reliable"] = 1] = "Reliable";
         NetMessageType[NetMessageType["ReliableOrdered"] = 2] = "ReliableOrdered";
         NetMessageType[NetMessageType["ReliableHeartbeat"] = 3] = "ReliableHeartbeat";
+        NetMessageType[NetMessageType["Disconnect"] = 4] = "Disconnect";
     })(NetMessageType = exports.NetMessageType || (exports.NetMessageType = {}));
     var NetMessage = /** @class */ (function () {
         function NetMessage(type, payload) {
@@ -483,7 +489,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
             // Mapping peers by their networkID
             this.peers = {};
             this.recvBuffer = [];
-            this.eventHandler = error_1.NetEventUtils.defaultHandler;
+            this.eventHandler = event_1.NetEventUtils.defaultHandler;
         }
         NetHost.prototype.acceptNewPeer = function (networkID) {
             var newPeer = new peer_1.NetPeer();
@@ -491,15 +497,28 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
             return newPeer;
         };
         NetHost.prototype.disconnectPeer = function (networkID) {
-            delete this.peers[networkID];
+            var peer = this.peers[networkID];
+            if (peer != undefined && !peer.waitingForDisconnect) {
+                // Clear all messages for this peer, and add a
+                // disconnect message
+                peer.sendBuffer.splice(0);
+                this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), networkID);
+                peer.waitingForDisconnect = true;
+            }
+        };
+        NetHost.prototype.finalDisconnectPeer = function (networkID) {
+            var peer = this.peers[networkID];
+            if (peer != undefined) {
+                delete this.peers[networkID];
+            }
         };
         NetHost.prototype.enqueueSend = function (msg, toNetworkID) {
             var peer = this.peers[toNetworkID];
-            if (peer == undefined) {
+            if (peer == undefined || peer.waitingForDisconnect) {
                 return;
             }
             msg.seqID = peer.msgSeqID++;
-            if (msg.type == NetMessageType.Unreliable) {
+            if (msg.type == NetMessageType.Unreliable || msg.type == NetMessageType.Disconnect) {
                 // No extra processing required
                 peer.sendBuffer.push(msg);
             }
@@ -521,7 +540,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
         };
         NetHost.prototype.enqueueRecv = function (msg, fromNetworkID) {
             var peer = this.peers[fromNetworkID];
-            if (peer == undefined) {
+            if (peer == undefined || peer.waitingForDisconnect) {
                 return;
             }
             var incomingMsg = new NetIncomingMessage(msg, peer.id);
@@ -531,7 +550,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
             }
             else {
                 if (!peer.recvSeqIDs.canGet(incomingMsg.seqID)) {
-                    this.eventHandler(this, peer, error_1.NetEvent.DuplicatesBufferOverrun, incomingMsg);
+                    this.eventHandler(this, peer, event_1.NetEvent.DuplicatesBufferOverrun, incomingMsg);
                     return;
                     // return; // Assume that it's a duplicate message
                 }
@@ -543,7 +562,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                         peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
                     }
                     else {
-                        this.eventHandler(this, peer, error_1.NetEvent.DuplicatesBufferOverflow, incomingMsg);
+                        this.eventHandler(this, peer, event_1.NetEvent.DuplicatesBufferOverflow, incomingMsg);
                         return;
                     }
                 }
@@ -551,6 +570,10 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
             if (incomingMsg.type == NetMessageType.Unreliable) {
                 // No extra processing required
                 this.recvBuffer.push(incomingMsg);
+            }
+            else if (incomingMsg.type == NetMessageType.Disconnect) {
+                this.eventHandler(this, peer, event_1.NetEvent.DisconnectRecv, incomingMsg);
+                this.finalDisconnectPeer(peer.id);
             }
             else {
                 var reliableMsg = msg;
@@ -565,7 +588,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                         peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                     }
                     else {
-                        this.eventHandler(this, peer, error_1.NetEvent.ReliableRecvBufferOverflow, incomingMsg);
+                        this.eventHandler(this, peer, event_1.NetEvent.ReliableRecvBufferOverflow, incomingMsg);
                         return;
                     }
                     for (var seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
@@ -604,7 +627,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                             var toResend = peer.relSentMsgs.get(relSeqID);
                             if (toResend == undefined) {
                                 // Ignore
-                                this.eventHandler(this, peer, error_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                                this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
                                 return;
                             }
                             else {
@@ -617,7 +640,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                             }
                         }
                         else if (relSeqID >= 0) {
-                            this.eventHandler(this, peer, error_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                            this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
                             return;
                         }
                     }
@@ -628,6 +651,13 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
             var peer = this.peers[destNetworkID];
             if (peer == undefined) {
                 return [];
+            }
+            // If the peer is scheduled for disconnection,
+            // disconnect him and send the disconnection message
+            if (peer.waitingForDisconnect) {
+                var ret = peer.sendBuffer.splice(0);
+                this.finalDisconnectPeer(peer.id);
+                return ret;
             }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
             if (!peer.relSent) {
@@ -691,7 +721,7 @@ define("host", ["require", "exports", "lagNetwork", "netlib/host"], function (re
     }());
     exports.Host = Host;
 });
-define("server", ["require", "exports", "entity", "render", "host", "netlib/host", "netlib/error"], function (require, exports, entity_1, render_1, host_2, host_3, error_2) {
+define("server", ["require", "exports", "entity", "render", "host", "netlib/host", "netlib/event"], function (require, exports, entity_1, render_1, host_2, host_3, event_2) {
     "use strict";
     exports.__esModule = true;
     var Server = /** @class */ (function (_super) {
@@ -771,14 +801,14 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
             this.status.textContent = info;
         };
         Server.prototype.netEventHandler = function (host, peer, error, msg) {
-            error_2.NetEventUtils.defaultHandler(host, peer, error, msg);
+            event_2.NetEventUtils.defaultHandler(host, peer, error, msg);
             this.netIDToEntity[peer.id].connected = false;
         };
         return Server;
     }(host_2.Host));
     exports.Server = Server;
 });
-define("client", ["require", "exports", "entity", "lagNetwork", "render", "host", "netlib/host", "netlib/error"], function (require, exports, entity_2, lagNetwork_2, render_2, host_4, host_5, error_3) {
+define("client", ["require", "exports", "entity", "lagNetwork", "render", "host", "netlib/host", "netlib/event"], function (require, exports, entity_2, lagNetwork_2, render_2, host_4, host_5, event_3) {
     "use strict";
     exports.__esModule = true;
     var Client = /** @class */ (function (_super) {
@@ -937,7 +967,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             }
         };
         Client.prototype.netEventHandler = function (host, peer, error, msg) {
-            error_3.NetEventUtils.defaultHandler(host, peer, error, msg);
+            event_3.NetEventUtils.defaultHandler(host, peer, error, msg);
             for (var entityID in this.entities) {
                 this.entities[entityID].connected = false;
             }

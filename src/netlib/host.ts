@@ -1,12 +1,13 @@
 import { NetPeer, StoredNetReliableMessage } from "./peer";
-import { NetEventHandler, NetEventUtils, NetEvent } from "./error";
+import { NetEventHandler, NetEventUtils, NetEvent } from "./event";
 
 export enum NetMessageType {
 
     Unreliable,
     Reliable,
     ReliableOrdered,
-    ReliableHeartbeat
+    ReliableHeartbeat,
+    Disconnect
 }
 
 export class NetMessage {
@@ -79,18 +80,32 @@ export class NetHost {
     }
 
     disconnectPeer(networkID: number) {
-        delete this.peers[networkID];
+        let peer = this.peers[networkID];
+        if (peer != undefined && !peer.waitingForDisconnect) {
+            // Clear all messages for this peer, and add a
+            // disconnect message
+            peer.sendBuffer.splice(0);
+            this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), networkID);
+            peer.waitingForDisconnect = true;
+        }
+    }
+
+    protected finalDisconnectPeer(networkID: number) {
+        let peer = this.peers[networkID];
+        if (peer != undefined) {
+            delete this.peers[networkID];
+        }
     }
 
     enqueueSend(msg: NetMessage, toNetworkID: number) {
         let peer = this.peers[toNetworkID];
-        if (peer == undefined) {
+        if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
         
         msg.seqID = peer.msgSeqID++;
 
-        if (msg.type == NetMessageType.Unreliable) {
+        if (msg.type == NetMessageType.Unreliable || msg.type == NetMessageType.Disconnect) {
             // No extra processing required
             peer.sendBuffer.push(msg);
         }
@@ -116,7 +131,7 @@ export class NetHost {
 
     enqueueRecv(msg: NetMessage, fromNetworkID: number) {
         let peer = this.peers[fromNetworkID];
-        if (peer == undefined) {
+        if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
 
@@ -149,6 +164,10 @@ export class NetHost {
         if (incomingMsg.type == NetMessageType.Unreliable) {
             // No extra processing required
             this.recvBuffer.push(incomingMsg);
+        }
+        else if (incomingMsg.type == NetMessageType.Disconnect) {
+            this.eventHandler(this, peer, NetEvent.DisconnectRecv, incomingMsg);
+            this.finalDisconnectPeer(peer.id);
         }
         else {
             let reliableMsg = msg as NetReliableMessage;
@@ -238,6 +257,14 @@ export class NetHost {
         let peer = this.peers[destNetworkID];
         if (peer == undefined) {
             return [];
+        }
+
+        // If the peer is scheduled for disconnection,
+        // disconnect him and send the disconnection message
+        if (peer.waitingForDisconnect) {
+            let ret = peer.sendBuffer.splice(0);
+            this.finalDisconnectPeer(peer.id);
+            return ret;
         }
 
         // If this peer wasn't sent any reliable messages this frame, send one for acks and ping

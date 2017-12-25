@@ -5,7 +5,7 @@ import { renderWorld } from "./render";
 import { Host } from "./host";
 import { NetMessage, NetMessageType, NetHost } from "./netlib/host";
 import { NetPeer } from "./netlib/peer";
-import { NetEvent, NetEventUtils } from "./netlib/error";
+import { NetEvent, NetEventUtils } from "./netlib/event";
 
 export class Server extends Host {
 
