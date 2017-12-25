@@ -24,7 +24,7 @@ export class NetReliableMessage extends NetMessage {
 
     relSeqID: number;
     relOrderSeqID: number;
-    relRecvLatestID: number;
+    relRecvHeadID: number;
     relRecvBuffer: Array<boolean>;
 
     constructor(original: NetMessage, relSeqID: number) {
@@ -78,11 +78,11 @@ export class NetHost {
             }
 
             // Attach our acks
-            reliableMsg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
+            reliableMsg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
             reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
 
             // Store message
-            peer.relSentMsgs.set(reliableMsg.seqID, new StoredNetReliableMessage(reliableMsg));
+            peer.relSentMsgs.set(reliableMsg.relSeqID, new StoredNetReliableMessage(reliableMsg));
 
             // Enqueue
             peer.sendBuffer.push(reliableMsg);
@@ -99,15 +99,20 @@ export class NetHost {
             peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
         }
         else {
-            if (peer.recvSeqIDs.isTooOld(incomingMsg.seqID)) {
-                return; // Assume that it's a duplicate message
+            if (!peer.recvSeqIDs.canGet(incomingMsg.seqID)) {
+                throw "received very old message";
+                // return; // Assume that it's a duplicate message
             }
-
-            if (peer.recvSeqIDs.get(incomingMsg.seqID) == true) {
+            else if (peer.recvSeqIDs.get(incomingMsg.seqID) == true) {
                 return; // This is a duplicate message, discard it
             }
             else {
-                peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
+                if (peer.recvSeqIDs.canSet(incomingMsg.seqID)) {
+                    peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
+                }
+                else {
+                    throw "can't update duplicates";
+                }
             }
         }
 
@@ -124,14 +129,15 @@ export class NetHost {
             }
             else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
                 // Store in queue
-                if (!peer.relRecvOrderMsgs.isTooOld(reliableMsg.relOrderSeqID)) {
+                if (peer.relRecvOrderMsgs.canSet(reliableMsg.relOrderSeqID)) {
                     peer.relRecvOrderMsgs.set(reliableMsg.relOrderSeqID, incomingMsg);
                 }
+                else {
+                    throw "received very old reliable ordered message";
+                }
 
-                let currentLatestSeqID = peer.relRecvOrderMsgs.getLatestID();
-
-                for (let seq = peer.relRecvOrderStartSeqID; seq <= currentLatestSeqID; ++seq) {
-                    if (peer.relRecvOrderMsgs.isTooOld(seq)) {
+                for (let seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
+                    if (!peer.relRecvOrderMsgs.canGet(seq)) {
                         break;
                     }
 
@@ -150,13 +156,17 @@ export class NetHost {
             }
 
             // Update our acks
-            if (!peer.relRecvMsgs.isTooOld(reliableMsg.relSeqID)) {
+            if (peer.relRecvMsgs.canSet(reliableMsg.relSeqID)) {
                 peer.relRecvMsgs.set(reliableMsg.relSeqID, true);
+            }
+            else {
+                // Message is too old, just ignore
+                // throw "can't update acks";
             }
 
             // Process the peer's acks
-            let start = reliableMsg.relRecvLatestID - reliableMsg.relRecvBuffer.length + 1;
-            let end = reliableMsg.relRecvLatestID;
+            let start = reliableMsg.relRecvHeadID - reliableMsg.relRecvBuffer.length + 1;
+            let end = reliableMsg.relRecvHeadID;
 
             for (let relSeqID = start; relSeqID <= end; ++relSeqID) {
                 let idx = relSeqID % reliableMsg.relRecvBuffer.length;
@@ -165,21 +175,25 @@ export class NetHost {
                     // TODO: set ping
                 }
                 else {
-                    if (!peer.relSentMsgs.isNew(relSeqID) && !peer.relSentMsgs.isTooOld(relSeqID)) {
+                    if (peer.relSentMsgs.canGet(relSeqID)) {
                         let toResend = peer.relSentMsgs.get(relSeqID);
 
                         if (toResend == undefined) {
                             // Ignore
+                            throw "can't find requested message to resend";
                         }
                         else {
                             // Attach our acks
-                            toResend.msg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
+                            toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                             toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
 
                             // Enqueue
                             peer.sendBuffer.push(toResend.msg);
                             peer.relSent = true;
                         }
+                    }
+                    else if (relSeqID >= 0) {
+                        throw "can't find requested message to resend";
                     }
                 }
             }

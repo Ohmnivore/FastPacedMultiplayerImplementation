@@ -1,7 +1,9 @@
 // Circular buffer
 export class SlidingArrayBuffer<T> {
 
-    protected latestID: number = -1;
+    protected initialized: boolean = false;
+    protected tailID: number = 0;
+    protected headID: number = -1;
     protected maxSize: number;
     protected buffer: Array<T | undefined> = [];
     protected fillFunction: (idx: number) => (T | undefined);
@@ -15,8 +17,8 @@ export class SlidingArrayBuffer<T> {
         }
     }
 
-    getLatestID(): number {
-        return this.latestID;
+    getHeadID(): number {
+        return this.headID;
     }
 
     getMaxSize(): number {
@@ -24,27 +26,47 @@ export class SlidingArrayBuffer<T> {
     }
 
     set(id: number, value: T) {
-        if (id > this.latestID) {
+        if (id > this.headID) {
             // Reset the values that just went from tail to head
-            for (let seq = this.latestID + 1; seq <= id; ++seq) {
+            for (let seq = this.headID + 1; seq <= id; ++seq) {
                 let idx = seq % this.maxSize;
                 this.buffer[idx] = this.fillFunction(seq);
             }
 
             // Update the most recently sent ID
-            this.latestID = id;
+            this.headID = id;
         }
 
         let idx = id % this.maxSize;
         this.buffer[idx] = value;
+
+        this.tailID = Math.min(this.tailID, id);
+        this.tailID = Math.max(this.tailID, this.headID - this.maxSize + 1);
+        this.initialized = true;
     }
 
     isNew(id: number): boolean {
-        return id > this.latestID;
+        return id > this.headID;
     }
 
-    isTooOld(id: number): boolean {
-        return this.latestID - id >= this.maxSize;
+    canSet(id: number): boolean {
+        if (!this.initialized) {
+            return true;
+        }
+
+        return this.headID - id < this.maxSize;
+    }
+
+    canGet(id: number): boolean {
+        if (!this.initialized) {
+            return false;
+        }
+
+        if (id < this.tailID) {
+            return false;
+        }
+
+        return id <= this.headID;
     }
 
     get(id: number): T | undefined {

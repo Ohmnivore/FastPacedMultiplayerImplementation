@@ -283,7 +283,9 @@ define("netlib/slidingBuffer", ["require", "exports"], function (require, export
     var SlidingArrayBuffer = /** @class */ (function () {
         function SlidingArrayBuffer(maxSize, fillFunction) {
             if (maxSize === void 0) { maxSize = 32; }
-            this.latestID = -1;
+            this.initialized = false;
+            this.tailID = 0;
+            this.headID = -1;
             this.buffer = [];
             this.maxSize = maxSize;
             this.fillFunction = fillFunction;
@@ -291,30 +293,45 @@ define("netlib/slidingBuffer", ["require", "exports"], function (require, export
                 this.buffer.push(fillFunction(idx));
             }
         }
-        SlidingArrayBuffer.prototype.getLatestID = function () {
-            return this.latestID;
+        SlidingArrayBuffer.prototype.getHeadID = function () {
+            return this.headID;
         };
         SlidingArrayBuffer.prototype.getMaxSize = function () {
             return this.maxSize;
         };
         SlidingArrayBuffer.prototype.set = function (id, value) {
-            if (id > this.latestID) {
+            if (id > this.headID) {
                 // Reset the values that just went from tail to head
-                for (var seq = this.latestID + 1; seq <= id; ++seq) {
+                for (var seq = this.headID + 1; seq <= id; ++seq) {
                     var idx_1 = seq % this.maxSize;
                     this.buffer[idx_1] = this.fillFunction(seq);
                 }
                 // Update the most recently sent ID
-                this.latestID = id;
+                this.headID = id;
             }
             var idx = id % this.maxSize;
             this.buffer[idx] = value;
+            this.tailID = Math.min(this.tailID, id);
+            this.tailID = Math.max(this.tailID, this.headID - this.maxSize + 1);
+            this.initialized = true;
         };
         SlidingArrayBuffer.prototype.isNew = function (id) {
-            return id > this.latestID;
+            return id > this.headID;
         };
-        SlidingArrayBuffer.prototype.isTooOld = function (id) {
-            return this.latestID - id >= this.maxSize;
+        SlidingArrayBuffer.prototype.canSet = function (id) {
+            if (!this.initialized) {
+                return true;
+            }
+            return this.headID - id < this.maxSize;
+        };
+        SlidingArrayBuffer.prototype.canGet = function (id) {
+            if (!this.initialized) {
+                return false;
+            }
+            if (id < this.tailID) {
+                return false;
+            }
+            return id <= this.headID;
         };
         SlidingArrayBuffer.prototype.get = function (id) {
             var idx = id % this.maxSize;
@@ -432,10 +449,10 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                     reliableMsg.relOrderSeqID = peer.relOrderSeqID++;
                 }
                 // Attach our acks
-                reliableMsg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
+                reliableMsg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                 reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
                 // Store message
-                peer.relSentMsgs.set(reliableMsg.seqID, new peer_1.StoredNetReliableMessage(reliableMsg));
+                peer.relSentMsgs.set(reliableMsg.relSeqID, new peer_1.StoredNetReliableMessage(reliableMsg));
                 // Enqueue
                 peer.sendBuffer.push(reliableMsg);
                 peer.relSent = true;
@@ -449,14 +466,20 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                 peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
             }
             else {
-                if (peer.recvSeqIDs.isTooOld(incomingMsg.seqID)) {
-                    return; // Assume that it's a duplicate message
+                if (!peer.recvSeqIDs.canGet(incomingMsg.seqID)) {
+                    throw "received very old message";
+                    // return; // Assume that it's a duplicate message
                 }
-                if (peer.recvSeqIDs.get(incomingMsg.seqID) == true) {
+                else if (peer.recvSeqIDs.get(incomingMsg.seqID) == true) {
                     return; // This is a duplicate message, discard it
                 }
                 else {
-                    peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
+                    if (peer.recvSeqIDs.canSet(incomingMsg.seqID)) {
+                        peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
+                    }
+                    else {
+                        throw "can't update duplicates";
+                    }
                 }
             }
             if (incomingMsg.type == NetMessageType.Unreliable) {
@@ -471,12 +494,14 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                 }
                 else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
                     // Store in queue
-                    if (!peer.relRecvOrderMsgs.isTooOld(reliableMsg.relOrderSeqID)) {
+                    if (peer.relRecvOrderMsgs.canSet(reliableMsg.relOrderSeqID)) {
                         peer.relRecvOrderMsgs.set(reliableMsg.relOrderSeqID, incomingMsg);
                     }
-                    var currentLatestSeqID = peer.relRecvOrderMsgs.getLatestID();
-                    for (var seq = peer.relRecvOrderStartSeqID; seq <= currentLatestSeqID; ++seq) {
-                        if (peer.relRecvOrderMsgs.isTooOld(seq)) {
+                    else {
+                        throw "received very old reliable ordered message";
+                    }
+                    for (var seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
+                        if (!peer.relRecvOrderMsgs.canGet(seq)) {
                             break;
                         }
                         var msg_1 = peer.relRecvOrderMsgs.get(seq);
@@ -491,31 +516,39 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                     // Process heartbeat messages but don't store them
                 }
                 // Update our acks
-                if (!peer.relRecvMsgs.isTooOld(reliableMsg.relSeqID)) {
+                if (peer.relRecvMsgs.canSet(reliableMsg.relSeqID)) {
                     peer.relRecvMsgs.set(reliableMsg.relSeqID, true);
                 }
+                else {
+                    // Message is too old, just ignore
+                    // throw "can't update acks";
+                }
                 // Process the peer's acks
-                var start = reliableMsg.relRecvLatestID - reliableMsg.relRecvBuffer.length + 1;
-                var end = reliableMsg.relRecvLatestID;
+                var start = reliableMsg.relRecvHeadID - reliableMsg.relRecvBuffer.length + 1;
+                var end = reliableMsg.relRecvHeadID;
                 for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
                     var idx = relSeqID % reliableMsg.relRecvBuffer.length;
                     if (reliableMsg.relRecvBuffer[idx] == true) {
                         // TODO: set ping
                     }
                     else {
-                        if (!peer.relSentMsgs.isNew(relSeqID) && !peer.relSentMsgs.isTooOld(relSeqID)) {
+                        if (peer.relSentMsgs.canGet(relSeqID)) {
                             var toResend = peer.relSentMsgs.get(relSeqID);
                             if (toResend == undefined) {
                                 // Ignore
+                                throw "can't find requested message to resend";
                             }
                             else {
                                 // Attach our acks
-                                toResend.msg.relRecvLatestID = peer.relRecvMsgs.getLatestID();
+                                toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                                 toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
                                 // Enqueue
                                 peer.sendBuffer.push(toResend.msg);
                                 peer.relSent = true;
                             }
+                        }
+                        else if (relSeqID >= 0) {
+                            throw "can't find requested message to resend";
                         }
                     }
                 }
