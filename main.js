@@ -196,7 +196,10 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
             return Math.floor(Math.random() * (this.lagMax - this.lagMin)) + this.lagMin;
         };
         NetworkState.prototype.shouldDrop = function () {
-            var newRoll = this.lastDropRoll * this.dropCorrelation + Math.random() * (1.0 - this.dropCorrelation);
+            var newRoll = Math.random();
+            if (this.lastDropRoll <= this.dropChance) {
+                newRoll = this.lastDropRoll * this.dropCorrelation + newRoll * (1.0 - this.dropCorrelation);
+            }
             this.lastDropRoll = newRoll;
             return newRoll <= this.dropChance;
         };
