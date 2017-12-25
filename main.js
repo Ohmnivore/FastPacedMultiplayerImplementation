@@ -989,6 +989,10 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host"]
             averageConnection.set(100, 200, 0.02, 0.75, 0.02);
             var terribleConnection = new lagNetwork_3.NetworkState();
             terribleConnection.set(100, 200, 0.5, 0.2, 0.1);
+            var terribleConnectionDuplicates = new lagNetwork_3.NetworkState();
+            terribleConnectionDuplicates.set(100, 200, 0.5, 0.2, 1.0);
+            TestLauncher.launchTest("Terrible connection reliable duplicates", host_7.NetMessageType.Reliable, false, 300, 60, 10, terribleConnectionDuplicates, terribleConnectionDuplicates);
+            TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", host_7.NetMessageType.Reliable, false, 300, 10, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
             TestLauncher.launchTest("Average connection reliable", host_7.NetMessageType.Reliable, false, 300, 60, 10, averageConnection, averageConnection);
             TestLauncher.launchTest("Average connection reliable ordered", host_7.NetMessageType.ReliableOrdered, false, 300, 60, 10, averageConnection, averageConnection);
             TestLauncher.launchTest("Average connection reliable lowfreq", host_7.NetMessageType.Reliable, false, 300, 10, 60, averageConnection, averageConnection);

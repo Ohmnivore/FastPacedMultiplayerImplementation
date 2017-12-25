@@ -158,6 +158,12 @@ export class TestLauncher {
         let terribleConnection = new NetworkState();
         terribleConnection.set(100, 200, 0.5, 0.2, 0.1);
 
+        let terribleConnectionDuplicates = new NetworkState();
+        terribleConnectionDuplicates.set(100, 200, 0.5, 0.2, 1.0);
+
+        TestLauncher.launchTest("Terrible connection reliable duplicates", NetMessageType.Reliable, false, 300, 60, 10, terribleConnectionDuplicates, terribleConnectionDuplicates);
+        TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", NetMessageType.Reliable, false, 300, 10, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
+
         TestLauncher.launchTest("Average connection reliable", NetMessageType.Reliable, false, 300, 60, 10, averageConnection, averageConnection);
         TestLauncher.launchTest("Average connection reliable ordered", NetMessageType.ReliableOrdered, false, 300, 60, 10, averageConnection, averageConnection);
 
