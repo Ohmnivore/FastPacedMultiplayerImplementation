@@ -46,10 +46,31 @@ export class NetPeer {
     relSent: boolean = false;
 
     sendBuffer: Array<NetMessage> = [];
+
+    // Disconnection and timeout
     waitingForDisconnect: boolean = false;
+    protected lastReceivedTimestamp: number; // milliseconds
+    protected lastReceivedTimestampSet: boolean = false;
 
     constructor() {
         // Automatically assing a unique ID
         this.id = NetPeer.curID++;
+    }
+
+    updateTimeout(timestamp: number) {
+        this.lastReceivedTimestampSet = true;
+        this.lastReceivedTimestamp = timestamp;
+    }
+
+    hasTimedOut(timestamp: number, timeout: number): boolean {
+        // In case we never receive a message at all, we need
+        // to also set this here
+        if (!this.lastReceivedTimestampSet) {
+            this.lastReceivedTimestampSet = true;
+            this.lastReceivedTimestamp = timestamp;
+            return false;
+        }
+
+        return timestamp - this.lastReceivedTimestamp >= timeout;
     }
 }

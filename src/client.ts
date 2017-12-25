@@ -55,8 +55,9 @@ export class Client extends Host {
         this.processInputs();
 
         // Send messages
-        this.netHost.getSendBuffer(this.server.networkID).forEach(message => {
-            this.server.network.send(+new Date(), this.sendState, message, this.networkID);
+        let curTimestamp = +new Date();
+        this.netHost.getSendBuffer(this.server.networkID, curTimestamp).forEach(message => {
+            this.server.network.send(curTimestamp, this.sendState, message, this.networkID);
         });
 
         // Interpolate other entities
@@ -196,7 +197,7 @@ export class Client extends Host {
         }
     }
 
-    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage) {
+    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage | undefined) {
         NetEventUtils.defaultHandler(host, peer, error, msg);
         for (let entityID in this.entities) {
             this.entities[entityID].connected = false;

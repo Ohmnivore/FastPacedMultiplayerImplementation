@@ -68,8 +68,9 @@ export class Server extends Host {
             let client = this.clients[i];
 
             this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), client.networkID);
-            this.netHost.getSendBuffer(client.networkID).forEach(message => {
-                client.network.send(+new Date(), client.recvState, message, this.networkID);
+            let curTimestamp = +new Date();
+            this.netHost.getSendBuffer(client.networkID, curTimestamp).forEach(message => {
+                client.network.send(curTimestamp, client.recvState, message, this.networkID);
             });
         }
     }
@@ -92,8 +93,8 @@ export class Server extends Host {
         this.status.textContent = info;
     }
 
-    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage) {
+    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage | undefined) {
         NetEventUtils.defaultHandler(host, peer, error, msg);
-        this.netIDToEntity[peer.id].connected = false;
+        this.netIDToEntity[peer.networkID].connected = false;
     }
 }

@@ -67,6 +67,8 @@ export class NetHost {
 
     eventHandler: NetEventHandler;
 
+    timeoutSeconds: number = 5.0;
+
     protected recvBuffer: Array<NetIncomingMessage> = [];
 
     constructor() {
@@ -75,6 +77,7 @@ export class NetHost {
 
     acceptNewPeer(networkID: number): NetPeer {
         let newPeer = new NetPeer();
+        newPeer.networkID = networkID;
         this.peers[networkID] = newPeer;
         return newPeer;
     }
@@ -129,11 +132,12 @@ export class NetHost {
         }
     }
 
-    enqueueRecv(msg: NetMessage, fromNetworkID: number) {
+    enqueueRecv(msg: NetMessage, fromNetworkID: number, curTimestamp: number) {
         let peer = this.peers[fromNetworkID];
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
+        peer.updateTimeout(curTimestamp);
 
         let incomingMsg = new NetIncomingMessage(msg, peer.id);
 
@@ -167,7 +171,7 @@ export class NetHost {
         }
         else if (incomingMsg.type == NetMessageType.Disconnect) {
             this.eventHandler(this, peer, NetEvent.DisconnectRecv, incomingMsg);
-            this.finalDisconnectPeer(peer.id);
+            this.finalDisconnectPeer(fromNetworkID);
         }
         else {
             let reliableMsg = msg as NetReliableMessage;
@@ -253,17 +257,23 @@ export class NetHost {
         }
     }
 
-    getSendBuffer(destNetworkID: number): Array<NetMessage> {
+    getSendBuffer(destNetworkID: number, curTimestamp: number): Array<NetMessage> {
         let peer = this.peers[destNetworkID];
         if (peer == undefined) {
             return [];
+        }
+
+        // Check if the peer has timed out, disconnect if he has
+        if (peer.hasTimedOut(curTimestamp, Math.round(this.timeoutSeconds * 1000.0))) {
+            this.eventHandler(this, peer, NetEvent.Timeout, undefined);
+            this.disconnectPeer(destNetworkID);
         }
 
         // If the peer is scheduled for disconnection,
         // disconnect him and send the disconnection message
         if (peer.waitingForDisconnect) {
             let ret = peer.sendBuffer.splice(0);
-            this.finalDisconnectPeer(peer.id);
+            this.finalDisconnectPeer(destNetworkID);
             return ret;
         }
 

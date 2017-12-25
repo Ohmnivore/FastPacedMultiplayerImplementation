@@ -78,7 +78,9 @@ export class TestServer extends Host {
     }
 
     update() {
-        this.pollMessages(this.fps.getLastTimestampAsMilliseconds());
+        let curTimestampMS = this.fps.getLastTimestampAsMilliseconds();
+
+        this.pollMessages(curTimestampMS);
 
         for (let i = 0; i < this.clients.length; i++) {
             let client = this.clients[i];
@@ -90,8 +92,8 @@ export class TestServer extends Host {
                 this.netHost.enqueueSend(new NetMessage(this.msgType, seqID), client.networkID);
             }
 
-            this.netHost.getSendBuffer(client.networkID).forEach(message => {
-                client.network.send(this.fps.getLastTimestampAsMilliseconds(), client.recvState, message, this.networkID);
+            this.netHost.getSendBuffer(client.networkID, curTimestampMS).forEach(message => {
+                client.network.send(curTimestampMS, client.recvState, message, this.networkID);
             });
         }
     }
@@ -118,8 +120,10 @@ export class TestClient extends Host {
     }
 
     update() {
+        let curTimestampMS = this.fps.getLastTimestampAsMilliseconds();
+
         // Receive messages
-        let messages = this.pollMessages(this.fps.getLastTimestampAsMilliseconds());
+        let messages = this.pollMessages(curTimestampMS);
 
         messages.forEach(message => {
             let payload = message.payload as number;
@@ -131,8 +135,8 @@ export class TestClient extends Host {
         });
 
         // Send messages
-        this.netHost.getSendBuffer(this.server.networkID).forEach(message => {
-            this.server.network.send(this.fps.getLastTimestampAsMilliseconds(), this.sendState, message, this.networkID);
+        this.netHost.getSendBuffer(this.server.networkID, curTimestampMS).forEach(message => {
+            this.server.network.send(curTimestampMS, this.sendState, message, this.networkID);
         });
     }
 

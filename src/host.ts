@@ -55,7 +55,7 @@ export class Host {
         // NetHost can discard a message or put one on hold until
         // an earlier one arrives.
         messages.forEach(message => {
-            this.netHost.enqueueRecv(message.payload, message.fromNetworkID);
+            this.netHost.enqueueRecv(message.payload, message.fromNetworkID, timestamp);
         });
 
         return this.netHost.getRecvBuffer();
