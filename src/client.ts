@@ -18,6 +18,7 @@ export class Client extends Host {
     // Input state
     keyLeft: boolean = false;
     keyRight: boolean = false;
+    lastServerMsgSeqID: number = -1;
 
     // Simulated network connection
     server: Server;
@@ -111,30 +112,36 @@ export class Client extends Host {
         let messages = this.pollMessages(+new Date());
 
         messages.forEach(message => {
-            let payload = message.payload as ServerEntityState[];
+            if (message.seqID <= this.lastServerMsgSeqID) {
+                // Ignore this message, it's a late one
+            }
+            else {
+                this.lastServerMsgSeqID = message.seqID;
+                let payload = message.payload as ServerEntityState[];
 
-            // World state is a list of entity states
-            for (let i = 0; i < payload.length; i++) {
-                let state = payload[i];
+                // World state is a list of entity states
+                for (let i = 0; i < payload.length; i++) {
+                    let state = payload[i];
 
-                // If this is the first time we see this entity, create a local representation
-                if (this.entities[state.entityID] == undefined) {
-                    let entity: Entity;
+                    // If this is the first time we see this entity, create a local representation
+                    if (this.entities[state.entityID] == undefined) {
+                        let entity: Entity;
+                        if (state.entityID == this.localEntityID) {
+                            entity = this.createLocalEntity();
+                        }
+                        else {
+                            entity = this.createRemoteEntity(state);
+                        }
+                        entity.entityID = state.entityID;
+                        this.entities[state.entityID] = entity;
+                    }
+
                     if (state.entityID == this.localEntityID) {
-                        entity = this.createLocalEntity();
+                        this.processLocalEntityState(this.localEntity, state);
                     }
                     else {
-                        entity = this.createRemoteEntity(state);
+                        this.processRemoteEntityState(this.remoteEntities[state.entityID], state);
                     }
-                    entity.entityID = state.entityID;
-                    this.entities[state.entityID] = entity;
-                }
-
-                if (state.entityID == this.localEntityID) {
-                    this.processLocalEntityState(this.localEntity, state);
-                }
-                else {
-                    this.processRemoteEntityState(this.remoteEntities[state.entityID], state);
                 }
             }
         });

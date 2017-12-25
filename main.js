@@ -678,6 +678,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Input state
             _this.keyLeft = false;
             _this.keyRight = false;
+            _this.lastServerMsgSeqID = -1;
             _this.sendState = new lagNetwork_2.NetworkState();
             _this.recvState = new lagNetwork_2.NetworkState();
             // Toggle options
@@ -751,27 +752,33 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Receive messages
             var messages = this.pollMessages(+new Date());
             messages.forEach(function (message) {
-                var payload = message.payload;
-                // World state is a list of entity states
-                for (var i = 0; i < payload.length; i++) {
-                    var state = payload[i];
-                    // If this is the first time we see this entity, create a local representation
-                    if (_this.entities[state.entityID] == undefined) {
-                        var entity = void 0;
+                if (message.seqID <= _this.lastServerMsgSeqID) {
+                    // Ignore this message, it's a late one
+                }
+                else {
+                    _this.lastServerMsgSeqID = message.seqID;
+                    var payload = message.payload;
+                    // World state is a list of entity states
+                    for (var i = 0; i < payload.length; i++) {
+                        var state = payload[i];
+                        // If this is the first time we see this entity, create a local representation
+                        if (_this.entities[state.entityID] == undefined) {
+                            var entity = void 0;
+                            if (state.entityID == _this.localEntityID) {
+                                entity = _this.createLocalEntity();
+                            }
+                            else {
+                                entity = _this.createRemoteEntity(state);
+                            }
+                            entity.entityID = state.entityID;
+                            _this.entities[state.entityID] = entity;
+                        }
                         if (state.entityID == _this.localEntityID) {
-                            entity = _this.createLocalEntity();
+                            _this.processLocalEntityState(_this.localEntity, state);
                         }
                         else {
-                            entity = _this.createRemoteEntity(state);
+                            _this.processRemoteEntityState(_this.remoteEntities[state.entityID], state);
                         }
-                        entity.entityID = state.entityID;
-                        _this.entities[state.entityID] = entity;
-                    }
-                    if (state.entityID == _this.localEntityID) {
-                        _this.processLocalEntityState(_this.localEntity, state);
-                    }
-                    else {
-                        _this.processRemoteEntityState(_this.remoteEntities[state.entityID], state);
                     }
                 }
             });
