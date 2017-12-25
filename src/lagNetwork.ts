@@ -53,8 +53,13 @@ export class NetworkState {
     }
 
     shouldDrop(): boolean {
-        let newRoll = this.lastDropRoll * this.dropCorrelation + Math.random() * (1.0 - this.dropCorrelation);
+        let newRoll = Math.random();
+        if (this.lastDropRoll <= this.dropChance) { // Drop correlation enabled only when last packet was dropped
+            newRoll = this.lastDropRoll * this.dropCorrelation + newRoll * (1.0 - this.dropCorrelation);
+        }
+        console.log(Math.round(newRoll * 100.0));
         this.lastDropRoll = newRoll;
+
         return newRoll <= this.dropChance;
     }
 
