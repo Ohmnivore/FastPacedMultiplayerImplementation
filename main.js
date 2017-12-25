@@ -25,7 +25,7 @@ define("entity", ["require", "exports"], function (require, exports) {
         function Entity() {
             this.x = 0;
             this.speed = 2;
-            this.lastServerFrameID = -1;
+            this.connected = true;
         }
         Entity.prototype.applyInput = function (input) {
             this.x += input.pressTime * this.speed;
@@ -269,7 +269,12 @@ define("render", ["require", "exports"], function (require, exports) {
                 ctx.fillStyle = colours[entity.entityID];
                 ctx.fill();
                 ctx.lineWidth = 5;
-                ctx.strokeStyle = "dark" + colours[entity.entityID];
+                if (entity.connected) {
+                    ctx.strokeStyle = "dark" + colours[entity.entityID];
+                }
+                else {
+                    ctx.strokeStyle = "yellow";
+                }
                 ctx.stroke();
             }
         }
@@ -386,34 +391,38 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
 define("netlib/error", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.__esModule = true;
-    var NetError;
-    (function (NetError) {
-        NetError[NetError["DuplicatesBufferOverrun"] = 0] = "DuplicatesBufferOverrun";
-        NetError[NetError["ReliableRecvBufferOverrun"] = 1] = "ReliableRecvBufferOverrun";
-        NetError[NetError["ReliableSendBufferOverrun"] = 2] = "ReliableSendBufferOverrun";
-    })(NetError = exports.NetError || (exports.NetError = {}));
-    var NetErrorUtils = /** @class */ (function () {
-        function NetErrorUtils() {
+    var NetEvent;
+    (function (NetEvent) {
+        NetEvent[NetEvent["DuplicatesBufferOverrun"] = 0] = "DuplicatesBufferOverrun";
+        NetEvent[NetEvent["DuplicatesBufferOverflow"] = 1] = "DuplicatesBufferOverflow";
+        NetEvent[NetEvent["ReliableRecvBufferOverflow"] = 2] = "ReliableRecvBufferOverflow";
+        NetEvent[NetEvent["ReliableSendBufferOverrun"] = 3] = "ReliableSendBufferOverrun";
+    })(NetEvent = exports.NetEvent || (exports.NetEvent = {}));
+    var NetEventUtils = /** @class */ (function () {
+        function NetEventUtils() {
         }
-        NetErrorUtils.getErrorString = function (error) {
-            if (error == NetError.DuplicatesBufferOverrun) {
+        NetEventUtils.getErrorString = function (error) {
+            if (error == NetEvent.DuplicatesBufferOverrun) {
                 return "Duplicates buffer overrun";
             }
-            else if (error == NetError.ReliableRecvBufferOverrun) {
-                return "Reliable receive buffer overrun";
+            else if (error == NetEvent.DuplicatesBufferOverflow) {
+                return "Duplicates buffer overflow";
+            }
+            else if (error == NetEvent.ReliableRecvBufferOverflow) {
+                return "Reliable receive buffer overflow";
             }
             else {
                 // NetError.ReliableSendBufferOverrun
                 return "Reliable send buffer overrun";
             }
         };
-        NetErrorUtils.defaultHandler = function (host, peer, error, msg) {
-            console.log("netlib error: [" + NetErrorUtils.getErrorString(error) + "] on peer [" + peer.id + "]");
+        NetEventUtils.defaultHandler = function (host, peer, error, msg) {
+            console.log("netlib error: [" + NetEventUtils.getErrorString(error) + "] on peer [" + peer.id + "]");
             host.disconnectPeer(peer.id);
         };
-        return NetErrorUtils;
+        return NetEventUtils;
     }());
-    exports.NetErrorUtils = NetErrorUtils;
+    exports.NetEventUtils = NetEventUtils;
 });
 define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], function (require, exports, peer_1, error_1) {
     "use strict";
@@ -471,7 +480,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
             // Mapping peers by their networkID
             this.peers = {};
             this.recvBuffer = [];
-            this.errorHandler = error_1.NetErrorUtils.defaultHandler;
+            this.eventHandler = error_1.NetEventUtils.defaultHandler;
         }
         NetHost.prototype.acceptNewPeer = function (networkID) {
             var newPeer = new peer_1.NetPeer();
@@ -519,7 +528,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
             }
             else {
                 if (!peer.recvSeqIDs.canGet(incomingMsg.seqID)) {
-                    this.errorHandler(this, peer, error_1.NetError.DuplicatesBufferOverrun, incomingMsg);
+                    this.eventHandler(this, peer, error_1.NetEvent.DuplicatesBufferOverrun, incomingMsg);
                     return;
                     // return; // Assume that it's a duplicate message
                 }
@@ -531,7 +540,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                         peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
                     }
                     else {
-                        this.errorHandler(this, peer, error_1.NetError.DuplicatesBufferOverrun, incomingMsg);
+                        this.eventHandler(this, peer, error_1.NetEvent.DuplicatesBufferOverflow, incomingMsg);
                         return;
                     }
                 }
@@ -553,7 +562,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                         peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                     }
                     else {
-                        this.errorHandler(this, peer, error_1.NetError.ReliableRecvBufferOverrun, incomingMsg);
+                        this.eventHandler(this, peer, error_1.NetEvent.ReliableRecvBufferOverflow, incomingMsg);
                         return;
                     }
                     for (var seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
@@ -592,7 +601,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                             var toResend = peer.relSentMsgs.get(relSeqID);
                             if (toResend == undefined) {
                                 // Ignore
-                                this.errorHandler(this, peer, error_1.NetError.ReliableSendBufferOverrun, incomingMsg);
+                                this.eventHandler(this, peer, error_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
                                 return;
                             }
                             else {
@@ -605,7 +614,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], fun
                             }
                         }
                         else if (relSeqID >= 0) {
-                            this.errorHandler(this, peer, error_1.NetError.ReliableSendBufferOverrun, incomingMsg);
+                            this.eventHandler(this, peer, error_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
                             return;
                         }
                     }
@@ -679,7 +688,7 @@ define("host", ["require", "exports", "lagNetwork", "netlib/host"], function (re
     }());
     exports.Host = Host;
 });
-define("server", ["require", "exports", "entity", "render", "host", "netlib/host"], function (require, exports, entity_1, render_1, host_2, host_3) {
+define("server", ["require", "exports", "entity", "render", "host", "netlib/host", "netlib/error"], function (require, exports, entity_1, render_1, host_2, host_3, error_2) {
     "use strict";
     exports.__esModule = true;
     var Server = /** @class */ (function (_super) {
@@ -689,9 +698,11 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
             // Connected clients and their entities
             _this.clients = [];
             _this.entities = {};
+            _this.netIDToEntity = {};
             _this.initialize(canvas, status);
             // Default update rate
             _this.setUpdateRate(10);
+            _this.netHost.eventHandler = _this.netEventHandler.bind(_this);
             return _this;
         }
         Server.prototype.connect = function (client) {
@@ -705,6 +716,7 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
             // Create a new Entity for this Client
             var entity = new entity_1.ServerEntity();
             this.entities[client.localEntityID] = entity;
+            this.netIDToEntity[client.networkID] = entity;
             entity.entityID = client.localEntityID;
             // Set the initial state of the Entity (e.g. spawn point)
             var spawnPoints = [4, 6];
@@ -755,11 +767,15 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
             }
             this.status.textContent = info;
         };
+        Server.prototype.netEventHandler = function (host, peer, error, msg) {
+            error_2.NetEventUtils.defaultHandler(host, peer, error, msg);
+            this.netIDToEntity[peer.id].connected = false;
+        };
         return Server;
     }(host_2.Host));
     exports.Server = Server;
 });
-define("client", ["require", "exports", "entity", "lagNetwork", "render", "host", "netlib/host"], function (require, exports, entity_2, lagNetwork_2, render_2, host_4, host_5) {
+define("client", ["require", "exports", "entity", "lagNetwork", "render", "host", "netlib/host", "netlib/error"], function (require, exports, entity_2, lagNetwork_2, render_2, host_4, host_5, error_3) {
     "use strict";
     exports.__esModule = true;
     var Client = /** @class */ (function (_super) {
@@ -782,6 +798,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             _this.initialize(canvas, status);
             // Update rate
             _this.setUpdateRate(50);
+            _this.netHost.eventHandler = _this.netEventHandler.bind(_this);
             return _this;
         }
         // Update Client state
@@ -914,6 +931,12 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             for (var i in this.remoteEntities) {
                 var entity = this.remoteEntities[i];
                 entity.interpolate(renderTimestamp);
+            }
+        };
+        Client.prototype.netEventHandler = function (host, peer, error, msg) {
+            error_3.NetEventUtils.defaultHandler(host, peer, error, msg);
+            for (var entityID in this.entities) {
+                this.entities[entityID].connected = false;
             }
         };
         return Client;

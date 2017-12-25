@@ -3,13 +3,16 @@ import { LagNetwork } from "./lagNetwork";
 import { Client } from "./client";
 import { renderWorld } from "./render";
 import { Host } from "./host";
-import { NetMessage, NetMessageType } from "./netlib/host";
+import { NetMessage, NetMessageType, NetHost } from "./netlib/host";
+import { NetPeer } from "./netlib/peer";
+import { NetEvent, NetEventUtils } from "./netlib/error";
 
 export class Server extends Host {
 
     // Connected clients and their entities
     protected clients: Array<Client> = [];
     protected entities: ServerEntities = {};
+    protected netIDToEntity: ServerEntities = {};
 
     constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
         super();
@@ -17,6 +20,8 @@ export class Server extends Host {
 
         // Default update rate
         this.setUpdateRate(10);
+        
+        this.netHost.eventHandler = this.netEventHandler.bind(this);
     }
 
     connect(client: Client) {
@@ -32,6 +37,7 @@ export class Server extends Host {
         // Create a new Entity for this Client
         let entity = new ServerEntity();
         this.entities[client.localEntityID] = entity;
+        this.netIDToEntity[client.networkID] = entity;
         entity.entityID = client.localEntityID;
       
         // Set the initial state of the Entity (e.g. spawn point)
@@ -84,5 +90,10 @@ export class Server extends Host {
             info += "Player " + i + ": #" + (entity.getLastProcessedInput() || 0) + "   ";
         }
         this.status.textContent = info;
+    }
+
+    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage) {
+        NetEventUtils.defaultHandler(host, peer, error, msg);
+        this.netIDToEntity[peer.id].connected = false;
     }
 }

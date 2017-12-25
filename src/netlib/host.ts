@@ -1,5 +1,5 @@
 import { NetPeer, StoredNetReliableMessage } from "./peer";
-import { NetErrorHandler, NetErrorUtils, NetError } from "./error";
+import { NetEventHandler, NetEventUtils, NetEvent } from "./error";
 
 export enum NetMessageType {
 
@@ -64,12 +64,12 @@ export class NetHost {
     // Mapping peers by their networkID
     peers: { [Key: number]: NetPeer } = {};
 
-    errorHandler: NetErrorHandler;
+    eventHandler: NetEventHandler;
 
     protected recvBuffer: Array<NetIncomingMessage> = [];
 
     constructor() {
-        this.errorHandler = NetErrorUtils.defaultHandler;
+        this.eventHandler = NetEventUtils.defaultHandler;
     }
 
     acceptNewPeer(networkID: number): NetPeer {
@@ -128,7 +128,7 @@ export class NetHost {
         }
         else {
             if (!peer.recvSeqIDs.canGet(incomingMsg.seqID)) {
-                this.errorHandler(this, peer, NetError.DuplicatesBufferOverrun, incomingMsg);
+                this.eventHandler(this, peer, NetEvent.DuplicatesBufferOverrun, incomingMsg);
                 return;
                 // return; // Assume that it's a duplicate message
             }
@@ -140,7 +140,7 @@ export class NetHost {
                     peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
                 }
                 else {
-                    this.errorHandler(this, peer, NetError.DuplicatesBufferOverrun, incomingMsg);
+                    this.eventHandler(this, peer, NetEvent.DuplicatesBufferOverflow, incomingMsg);
                     return;
                 }
             }
@@ -164,7 +164,7 @@ export class NetHost {
                     peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                 }
                 else {
-                    this.errorHandler(this, peer, NetError.ReliableRecvBufferOverrun, incomingMsg);
+                    this.eventHandler(this, peer, NetEvent.ReliableRecvBufferOverflow, incomingMsg);
                     return;
                 }
 
@@ -212,7 +212,7 @@ export class NetHost {
 
                         if (toResend == undefined) {
                             // Ignore
-                            this.errorHandler(this, peer, NetError.ReliableSendBufferOverrun, incomingMsg);
+                            this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
                             return;
                         }
                         else {
@@ -226,7 +226,7 @@ export class NetHost {
                         }
                     }
                     else if (relSeqID >= 0) {
-                        this.errorHandler(this, peer, NetError.ReliableSendBufferOverrun, incomingMsg);
+                        this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
                         return;
                     }
                 }

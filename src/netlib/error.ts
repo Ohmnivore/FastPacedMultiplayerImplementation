@@ -1,23 +1,27 @@
 import { NetHost, NetMessage } from "./host";
 import { NetPeer } from "./peer";
 
-export type NetErrorHandler = (host: NetHost, peer: NetPeer, error: NetError, msg: NetMessage) => void;
+export type NetEventHandler = (host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage) => void;
 
-export enum NetError {
+export enum NetEvent {
 
     DuplicatesBufferOverrun,
-    ReliableRecvBufferOverrun,
+    DuplicatesBufferOverflow,
+    ReliableRecvBufferOverflow,
     ReliableSendBufferOverrun
 }
 
-export class NetErrorUtils {
+export class NetEventUtils {
 
-    static getErrorString(error: NetError): string {
-        if (error == NetError.DuplicatesBufferOverrun) {
+    static getErrorString(error: NetEvent): string {
+        if (error == NetEvent.DuplicatesBufferOverrun) {
             return "Duplicates buffer overrun";
         }
-        else if (error == NetError.ReliableRecvBufferOverrun) {
-            return "Reliable receive buffer overrun";
+        else if (error == NetEvent.DuplicatesBufferOverflow) {
+            return "Duplicates buffer overflow";
+        }
+        else if (error == NetEvent.ReliableRecvBufferOverflow) {
+            return "Reliable receive buffer overflow";
         }
         else {
             // NetError.ReliableSendBufferOverrun
@@ -25,8 +29,8 @@ export class NetErrorUtils {
         }
     }
 
-    static defaultHandler(host: NetHost, peer: NetPeer, error: NetError, msg: NetMessage) {
-        console.log("netlib error: [" + NetErrorUtils.getErrorString(error) + "] on peer [" + peer.id + "]");
+    static defaultHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage) {
+        console.log("netlib error: [" + NetEventUtils.getErrorString(error) + "] on peer [" + peer.id + "]");
         host.disconnectPeer(peer.id);
     }
 }

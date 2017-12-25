@@ -3,7 +3,9 @@ import { LagNetwork, NetworkState } from "./lagNetwork";
 import { renderWorld } from "./render";
 import { Server } from "./server";
 import { Host } from "./host";
-import { NetMessage, NetMessageType } from "./netlib/host";
+import { NetMessage, NetMessageType, NetHost } from "./netlib/host";
+import { NetPeer } from "./netlib/peer";
+import { NetEvent, NetEventUtils } from "./netlib/error";
 
 export class Client extends Host {
 
@@ -36,6 +38,8 @@ export class Client extends Host {
 
         // Update rate
         this.setUpdateRate(50);
+
+        this.netHost.eventHandler = this.netEventHandler.bind(this);
     }
 
     // Update Client state
@@ -189,6 +193,13 @@ export class Client extends Host {
         for (let i in this.remoteEntities) { 
             let entity = this.remoteEntities[i];
             entity.interpolate(renderTimestamp);
+        }
+    }
+
+    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage) {
+        NetEventUtils.defaultHandler(host, peer, error, msg);
+        for (let entityID in this.entities) {
+            this.entities[entityID].connected = false;
         }
     }
 }

@@ -21,7 +21,7 @@ export class Entity {
     entityID: number;
     x: number = 0;
     speed: number = 2;
-    lastServerFrameID: number = -1;
+    connected: boolean = true;
 
     applyInput(input: Input) {
         this.x += input.pressTime * this.speed;
