@@ -383,7 +383,39 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
     }());
     exports.NetPeer = NetPeer;
 });
-define("netlib/host", ["require", "exports", "netlib/peer"], function (require, exports, peer_1) {
+define("netlib/error", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.__esModule = true;
+    var NetError;
+    (function (NetError) {
+        NetError[NetError["DuplicatesBufferOverrun"] = 0] = "DuplicatesBufferOverrun";
+        NetError[NetError["ReliableRecvBufferOverrun"] = 1] = "ReliableRecvBufferOverrun";
+        NetError[NetError["ReliableSendBufferOverrun"] = 2] = "ReliableSendBufferOverrun";
+    })(NetError = exports.NetError || (exports.NetError = {}));
+    var NetErrorUtils = /** @class */ (function () {
+        function NetErrorUtils() {
+        }
+        NetErrorUtils.getErrorString = function (error) {
+            if (error == NetError.DuplicatesBufferOverrun) {
+                return "Duplicates buffer overrun";
+            }
+            else if (error == NetError.ReliableRecvBufferOverrun) {
+                return "Reliable receive buffer overrun";
+            }
+            else {
+                // NetError.ReliableSendBufferOverrun
+                return "Reliable send buffer overrun";
+            }
+        };
+        NetErrorUtils.defaultHandler = function (host, peer, error, msg) {
+            console.log("netlib error: [" + NetErrorUtils.getErrorString(error) + "] on peer [" + peer.id + "]");
+            host.disconnectPeer(peer.id);
+        };
+        return NetErrorUtils;
+    }());
+    exports.NetErrorUtils = NetErrorUtils;
+});
+define("netlib/host", ["require", "exports", "netlib/peer", "netlib/error"], function (require, exports, peer_1, error_1) {
     "use strict";
     exports.__esModule = true;
     var NetMessageType;
@@ -412,6 +444,16 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
         return NetReliableMessage;
     }(NetMessage));
     exports.NetReliableMessage = NetReliableMessage;
+    var NetReliableOrderedMessage = /** @class */ (function (_super) {
+        __extends(NetReliableOrderedMessage, _super);
+        function NetReliableOrderedMessage(original, relOrderSeqID) {
+            var _this = _super.call(this, original, original.relSeqID) || this;
+            _this.relOrderSeqID = relOrderSeqID;
+            return _this;
+        }
+        return NetReliableOrderedMessage;
+    }(NetReliableMessage));
+    exports.NetReliableOrderedMessage = NetReliableOrderedMessage;
     var NetIncomingMessage = /** @class */ (function (_super) {
         __extends(NetIncomingMessage, _super);
         function NetIncomingMessage(original, fromPeerID) {
@@ -429,14 +471,21 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
             // Mapping peers by their networkID
             this.peers = {};
             this.recvBuffer = [];
+            this.errorHandler = error_1.NetErrorUtils.defaultHandler;
         }
         NetHost.prototype.acceptNewPeer = function (networkID) {
             var newPeer = new peer_1.NetPeer();
             this.peers[networkID] = newPeer;
             return newPeer;
         };
+        NetHost.prototype.disconnectPeer = function (networkID) {
+            delete this.peers[networkID];
+        };
         NetHost.prototype.enqueueSend = function (msg, toNetworkID) {
             var peer = this.peers[toNetworkID];
+            if (peer == undefined) {
+                return;
+            }
             msg.seqID = peer.msgSeqID++;
             if (msg.type == NetMessageType.Unreliable) {
                 // No extra processing required
@@ -446,7 +495,7 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                 // Create a reliable message
                 var reliableMsg = new NetReliableMessage(msg, peer.relSeqID++);
                 if (reliableMsg.type == NetMessageType.ReliableOrdered) {
-                    reliableMsg.relOrderSeqID = peer.relOrderSeqID++;
+                    reliableMsg = new NetReliableOrderedMessage(reliableMsg, peer.relOrderSeqID++);
                 }
                 // Attach our acks
                 reliableMsg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
@@ -460,6 +509,9 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
         };
         NetHost.prototype.enqueueRecv = function (msg, fromNetworkID) {
             var peer = this.peers[fromNetworkID];
+            if (peer == undefined) {
+                return;
+            }
             var incomingMsg = new NetIncomingMessage(msg, peer.id);
             // Detect and discard duplicates
             if (peer.recvSeqIDs.isNew(incomingMsg.seqID)) {
@@ -467,7 +519,8 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
             }
             else {
                 if (!peer.recvSeqIDs.canGet(incomingMsg.seqID)) {
-                    throw "received very old message";
+                    this.errorHandler(this, peer, error_1.NetError.DuplicatesBufferOverrun, incomingMsg);
+                    return;
                     // return; // Assume that it's a duplicate message
                 }
                 else if (peer.recvSeqIDs.get(incomingMsg.seqID) == true) {
@@ -478,7 +531,8 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                         peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
                     }
                     else {
-                        throw "can't update duplicates";
+                        this.errorHandler(this, peer, error_1.NetError.DuplicatesBufferOverrun, incomingMsg);
+                        return;
                     }
                 }
             }
@@ -494,11 +548,13 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                 }
                 else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
                     // Store in queue
-                    if (peer.relRecvOrderMsgs.canSet(reliableMsg.relOrderSeqID)) {
-                        peer.relRecvOrderMsgs.set(reliableMsg.relOrderSeqID, incomingMsg);
+                    var reliableOrderedMsg = reliableMsg;
+                    if (peer.relRecvOrderMsgs.canSet(reliableOrderedMsg.relOrderSeqID)) {
+                        peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                     }
                     else {
-                        throw "received very old reliable ordered message";
+                        this.errorHandler(this, peer, error_1.NetError.ReliableRecvBufferOverrun, incomingMsg);
+                        return;
                     }
                     for (var seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
                         if (!peer.relRecvOrderMsgs.canGet(seq)) {
@@ -536,7 +592,8 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                             var toResend = peer.relSentMsgs.get(relSeqID);
                             if (toResend == undefined) {
                                 // Ignore
-                                throw "can't find requested message to resend";
+                                this.errorHandler(this, peer, error_1.NetError.ReliableSendBufferOverrun, incomingMsg);
+                                return;
                             }
                             else {
                                 // Attach our acks
@@ -548,7 +605,8 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
                             }
                         }
                         else if (relSeqID >= 0) {
-                            throw "can't find requested message to resend";
+                            this.errorHandler(this, peer, error_1.NetError.ReliableSendBufferOverrun, incomingMsg);
+                            return;
                         }
                     }
                 }
@@ -556,6 +614,9 @@ define("netlib/host", ["require", "exports", "netlib/peer"], function (require, 
         };
         NetHost.prototype.getSendBuffer = function (destNetworkID) {
             var peer = this.peers[destNetworkID];
+            if (peer == undefined) {
+                return [];
+            }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
             if (!peer.relSent) {
                 this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID);

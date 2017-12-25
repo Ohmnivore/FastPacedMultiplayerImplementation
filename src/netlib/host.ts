@@ -1,4 +1,5 @@
 import { NetPeer, StoredNetReliableMessage } from "./peer";
+import { NetErrorHandler, NetErrorUtils, NetError } from "./error";
 
 export enum NetMessageType {
 
@@ -23,7 +24,6 @@ export class NetMessage {
 export class NetReliableMessage extends NetMessage {
 
     relSeqID: number;
-    relOrderSeqID: number;
     relRecvHeadID: number;
     relRecvBuffer: Array<boolean>;
 
@@ -32,6 +32,16 @@ export class NetReliableMessage extends NetMessage {
         this.seqID = original.seqID;
 
         this.relSeqID = relSeqID;
+    }
+}
+
+export class NetReliableOrderedMessage extends NetReliableMessage {
+
+    relOrderSeqID: number;
+
+    constructor(original: NetReliableMessage, relOrderSeqID: number) {
+        super(original, original.relSeqID);
+        this.relOrderSeqID = relOrderSeqID;
     }
 }
 
@@ -54,7 +64,13 @@ export class NetHost {
     // Mapping peers by their networkID
     peers: { [Key: number]: NetPeer } = {};
 
+    errorHandler: NetErrorHandler;
+
     protected recvBuffer: Array<NetIncomingMessage> = [];
+
+    constructor() {
+        this.errorHandler = NetErrorUtils.defaultHandler;
+    }
 
     acceptNewPeer(networkID: number): NetPeer {
         let newPeer = new NetPeer();
@@ -62,8 +78,16 @@ export class NetHost {
         return newPeer;
     }
 
+    disconnectPeer(networkID: number) {
+        delete this.peers[networkID];
+    }
+
     enqueueSend(msg: NetMessage, toNetworkID: number) {
         let peer = this.peers[toNetworkID];
+        if (peer == undefined) {
+            return;
+        }
+        
         msg.seqID = peer.msgSeqID++;
 
         if (msg.type == NetMessageType.Unreliable) {
@@ -74,7 +98,7 @@ export class NetHost {
             // Create a reliable message
             let reliableMsg = new NetReliableMessage(msg, peer.relSeqID++);
             if (reliableMsg.type == NetMessageType.ReliableOrdered) {
-                reliableMsg.relOrderSeqID = peer.relOrderSeqID++;
+                reliableMsg = new NetReliableOrderedMessage(reliableMsg, peer.relOrderSeqID++);
             }
 
             // Attach our acks
@@ -92,6 +116,10 @@ export class NetHost {
 
     enqueueRecv(msg: NetMessage, fromNetworkID: number) {
         let peer = this.peers[fromNetworkID];
+        if (peer == undefined) {
+            return;
+        }
+
         let incomingMsg = new NetIncomingMessage(msg, peer.id);
 
         // Detect and discard duplicates
@@ -100,7 +128,8 @@ export class NetHost {
         }
         else {
             if (!peer.recvSeqIDs.canGet(incomingMsg.seqID)) {
-                throw "received very old message";
+                this.errorHandler(this, peer, NetError.DuplicatesBufferOverrun, incomingMsg);
+                return;
                 // return; // Assume that it's a duplicate message
             }
             else if (peer.recvSeqIDs.get(incomingMsg.seqID) == true) {
@@ -111,7 +140,8 @@ export class NetHost {
                     peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
                 }
                 else {
-                    throw "can't update duplicates";
+                    this.errorHandler(this, peer, NetError.DuplicatesBufferOverrun, incomingMsg);
+                    return;
                 }
             }
         }
@@ -129,11 +159,13 @@ export class NetHost {
             }
             else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
                 // Store in queue
-                if (peer.relRecvOrderMsgs.canSet(reliableMsg.relOrderSeqID)) {
-                    peer.relRecvOrderMsgs.set(reliableMsg.relOrderSeqID, incomingMsg);
+                let reliableOrderedMsg = reliableMsg as NetReliableOrderedMessage;
+                if (peer.relRecvOrderMsgs.canSet(reliableOrderedMsg.relOrderSeqID)) {
+                    peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                 }
                 else {
-                    throw "received very old reliable ordered message";
+                    this.errorHandler(this, peer, NetError.ReliableRecvBufferOverrun, incomingMsg);
+                    return;
                 }
 
                 for (let seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
@@ -180,7 +212,8 @@ export class NetHost {
 
                         if (toResend == undefined) {
                             // Ignore
-                            throw "can't find requested message to resend";
+                            this.errorHandler(this, peer, NetError.ReliableSendBufferOverrun, incomingMsg);
+                            return;
                         }
                         else {
                             // Attach our acks
@@ -193,7 +226,8 @@ export class NetHost {
                         }
                     }
                     else if (relSeqID >= 0) {
-                        throw "can't find requested message to resend";
+                        this.errorHandler(this, peer, NetError.ReliableSendBufferOverrun, incomingMsg);
+                        return;
                     }
                 }
             }
@@ -202,6 +236,9 @@ export class NetHost {
 
     getSendBuffer(destNetworkID: number): Array<NetMessage> {
         let peer = this.peers[destNetworkID];
+        if (peer == undefined) {
+            return [];
+        }
 
         // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
         if (!peer.relSent) {
