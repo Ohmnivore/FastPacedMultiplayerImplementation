@@ -271,10 +271,6 @@ export class NetHost {
                             return;
                         }
                         else if (toResend.timesAcked == 0) {
-                            // Attach our acks
-                            toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
-                            toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
-
                             // Resend callback
                             if (toResend.msg.onResend != undefined) {
                                 toResend.msg.onResend(toResend, peer);
@@ -282,7 +278,6 @@ export class NetHost {
 
                             // Enqueue
                             peer.sendBuffer.push(toResend.msg);
-                            peer.relSent = true;
                         }
                     }
                     else if (relSeqID >= 0) {
@@ -320,10 +315,6 @@ export class NetHost {
             let toResend = peer.relSentMsgs.get(relSeqID);
 
             if (toResend != undefined) {
-                // Attach our acks
-                toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
-                toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
-
                 // Resend callback
                 if (toResend.msg.onResend != undefined) {
                     toResend.msg.onResend(toResend, peer);
@@ -331,7 +322,6 @@ export class NetHost {
 
                 // Enqueue
                 peer.sendBuffer.push(toResend.msg);
-                // peer.relSent = true; // Still send a heartbeat to keep the protocol moving
             }
         }
 

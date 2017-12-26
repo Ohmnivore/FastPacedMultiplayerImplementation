@@ -13,10 +13,12 @@ class Message {
 
 class TimedMessage {
 
+    sendTS: number;
     recvTS: number;
     payload: Message;
 
-    constructor(recvTS: number, payload: Message) {
+    constructor(sendTS: number, recvTS: number, payload: Message) {
+        this.sendTS = sendTS;
         this.recvTS = recvTS;
         this.payload = payload;
     }
@@ -73,10 +75,10 @@ export class LagNetwork {
 
     send(timestamp: number, state: NetworkState, payload: any, fromNetworkID: number) {
         if (!state.shouldDrop()) {
-            this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
+            this.directSend(new TimedMessage(timestamp, timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
 
             if (state.shouldDuplicate()) {
-                this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
+                this.directSend(new TimedMessage(timestamp, timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
             }
         }
     }

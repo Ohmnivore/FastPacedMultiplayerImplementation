@@ -70,7 +70,10 @@ export class Client extends Host {
 
         // Show some info
         let info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
-        info += " · Ping: " + Math.round(this.netHost.peers[this.server.networkID].rtt / 2.0);
+        let peerServer = this.netHost.peers[this.server.networkID];
+        if (peerServer != undefined) {
+            info += " · Ping: " + Math.round(peerServer.rtt);
+        }
         this.status.textContent = info;
     }
 

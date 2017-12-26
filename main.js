@@ -177,7 +177,8 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
         return Message;
     }());
     var TimedMessage = /** @class */ (function () {
-        function TimedMessage(recvTS, payload) {
+        function TimedMessage(sendTS, recvTS, payload) {
+            this.sendTS = sendTS;
             this.recvTS = recvTS;
             this.payload = payload;
         }
@@ -229,9 +230,9 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
         }
         LagNetwork.prototype.send = function (timestamp, state, payload, fromNetworkID) {
             if (!state.shouldDrop()) {
-                this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
+                this.directSend(new TimedMessage(timestamp, timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
                 if (state.shouldDuplicate()) {
-                    this.directSend(new TimedMessage(timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
+                    this.directSend(new TimedMessage(timestamp, timestamp + state.randomLag(), new Message(payload, fromNetworkID)));
                 }
             }
         };
@@ -689,16 +690,12 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                                 return;
                             }
                             else if (toResend.timesAcked == 0) {
-                                // Attach our acks
-                                toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
-                                toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
                                 // Resend callback
                                 if (toResend.msg.onResend != undefined) {
                                     toResend.msg.onResend(toResend, peer);
                                 }
                                 // Enqueue
                                 peer.sendBuffer.push(toResend.msg);
-                                peer.relSent = true;
                             }
                         }
                         else if (relSeqID >= 0) {
@@ -731,16 +728,12 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
             for (var relSeqID = relHeadSeqID; relSeqID >= relHeadSeqID - 4; --relSeqID) {
                 var toResend = peer.relSentMsgs.get(relSeqID);
                 if (toResend != undefined) {
-                    // Attach our acks
-                    toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
-                    toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
                     // Resend callback
                     if (toResend.msg.onResend != undefined) {
                         toResend.msg.onResend(toResend, peer);
                     }
                     // Enqueue
                     peer.sendBuffer.push(toResend.msg);
-                    // peer.relSent = true; // Still send a heartbeat to keep the protocol moving
                 }
             }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
@@ -942,7 +935,10 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             render_2.renderWorld(this.canvas, this.entities);
             // Show some info
             var info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
-            info += " · Ping: " + Math.round(this.netHost.peers[this.server.networkID].rtt / 2.0);
+            var peerServer = this.netHost.peers[this.server.networkID];
+            if (peerServer != undefined) {
+                info += " · Ping: " + Math.round(peerServer.rtt);
+            }
             this.status.textContent = info;
         };
         // Get inputs and send them to the server
