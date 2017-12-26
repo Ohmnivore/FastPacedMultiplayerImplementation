@@ -388,7 +388,7 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
             this.waitingForDisconnect = false;
             this.lastReceivedTimestampSet = false;
             // Stats
-            this.rtt = 0.0; // milliseconds
+            this.rtt = 100; // milliseconds, assume 100 when peer connects
             // Automatically assing a unique ID
             this.id = NetPeer.curID++;
             this.setRTTSmoothingFactor(64);
@@ -486,6 +486,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
         __extends(NetReliableMessage, _super);
         function NetReliableMessage(original, relSeqID) {
             var _this = _super.call(this, original.type, original.payload) || this;
+            _this.onAck = original.onAck;
             _this.seqID = original.seqID;
             _this.relSeqID = relSeqID;
             return _this;
@@ -663,8 +664,13 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                                 return;
                             }
                             else if (stored.timesAcked == 0) {
+                                // Update peer RTT
                                 var rtt = curTimestamp - stored.sentTimestamp;
                                 peer.updateRTT(rtt);
+                                // Ack callback
+                                if (stored.msg.onAck != undefined) {
+                                    stored.msg.onAck(stored.msg, peer);
+                                }
                                 stored.timesAcked++;
                             }
                         }

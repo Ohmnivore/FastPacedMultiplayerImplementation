@@ -54,7 +54,7 @@ export class NetPeer {
     protected lastReceivedTimestampSet: boolean = false;
 
     // Stats
-    rtt: number = 0.0; // milliseconds
+    rtt: number = 100; // milliseconds, assume 100 when peer connects
     protected smoothingFactor: number;
 
     constructor() {

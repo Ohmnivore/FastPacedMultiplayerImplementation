@@ -10,10 +10,13 @@ export enum NetMessageType {
     Disconnect
 }
 
+export type NetMsgAckCallback = (msg: NetMessage, peer: NetPeer) => void;
+
 export class NetMessage {
 
     type: NetMessageType;
     payload: any;
+    onAck: NetMsgAckCallback;
     seqID: number;
 
     constructor(type: NetMessageType, payload: any) {
@@ -30,6 +33,7 @@ export class NetReliableMessage extends NetMessage {
 
     constructor(original: NetMessage, relSeqID: number) {
         super(original.type, original.payload);
+        this.onAck = original.onAck;
         this.seqID = original.seqID;
 
         this.relSeqID = relSeqID;
@@ -237,8 +241,15 @@ export class NetHost {
                             return;
                         }
                         else if (stored.timesAcked == 0) {
+                            // Update peer RTT
                             let rtt = curTimestamp - stored.sentTimestamp;
                             peer.updateRTT(rtt);
+
+                            // Ack callback
+                            if (stored.msg.onAck != undefined) {
+                                stored.msg.onAck(stored.msg, peer);
+                            }
+
                             stored.timesAcked++;
                         }
                     }
