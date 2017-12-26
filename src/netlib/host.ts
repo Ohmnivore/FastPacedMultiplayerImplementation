@@ -306,6 +306,22 @@ export class NetHost {
             return ret;
         }
 
+        // Extremely basic redundancy strategy - resend the reliable messages from the past 4 frames
+        let relHeadSeqID = peer.relSentMsgs.getHeadID();
+        for (let relSeqID = relHeadSeqID; relSeqID >= relHeadSeqID - 4; --relSeqID) {
+            let toResend = peer.relSentMsgs.get(relSeqID);
+
+            if (toResend != undefined) {
+                // Attach our acks
+                toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
+                toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
+
+                // Enqueue
+                peer.sendBuffer.push(toResend.msg);
+                // peer.relSent = true; // Still send a heartbeat to keep the protocol moving
+            }
+        }
+
         // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
         if (!peer.relSent) {
             this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID, curTimestamp);

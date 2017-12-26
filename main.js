@@ -721,6 +721,19 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                 this.finalDisconnectPeer(destNetworkID);
                 return ret;
             }
+            // Extremely basic redundancy strategy - resend the reliable messages from the past 4 frames
+            var relHeadSeqID = peer.relSentMsgs.getHeadID();
+            for (var relSeqID = relHeadSeqID; relSeqID >= relHeadSeqID - 4; --relSeqID) {
+                var toResend = peer.relSentMsgs.get(relSeqID);
+                if (toResend != undefined) {
+                    // Attach our acks
+                    toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
+                    toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
+                    // Enqueue
+                    peer.sendBuffer.push(toResend.msg);
+                    // peer.relSent = true; // Still send a heartbeat to keep the protocol moving
+                }
+            }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
             if (!peer.relSent) {
                 this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID, curTimestamp);
