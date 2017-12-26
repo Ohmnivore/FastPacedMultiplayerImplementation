@@ -11,12 +11,14 @@ export enum NetMessageType {
 }
 
 export type NetMsgAckCallback = (msg: NetMessage, peer: NetPeer) => void;
+export type NetMsgResendCallback = (msg: StoredNetReliableMessage, peer: NetPeer) => void;
 
 export class NetMessage {
 
     type: NetMessageType;
     payload: any;
     onAck: NetMsgAckCallback;
+    onResend: NetMsgResendCallback;
     seqID: number;
 
     constructor(type: NetMessageType, payload: any) {
@@ -34,6 +36,7 @@ export class NetReliableMessage extends NetMessage {
     constructor(original: NetMessage, relSeqID: number) {
         super(original.type, original.payload);
         this.onAck = original.onAck;
+        this.onResend = original.onResend;
         this.seqID = original.seqID;
 
         this.relSeqID = relSeqID;
@@ -272,6 +275,11 @@ export class NetHost {
                             toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                             toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
 
+                            // Resend callback
+                            if (toResend.msg.onResend != undefined) {
+                                toResend.msg.onResend(toResend, peer);
+                            }
+
                             // Enqueue
                             peer.sendBuffer.push(toResend.msg);
                             peer.relSent = true;
@@ -315,6 +323,11 @@ export class NetHost {
                 // Attach our acks
                 toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                 toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
+
+                // Resend callback
+                if (toResend.msg.onResend != undefined) {
+                    toResend.msg.onResend(toResend, peer);
+                }
 
                 // Enqueue
                 peer.sendBuffer.push(toResend.msg);

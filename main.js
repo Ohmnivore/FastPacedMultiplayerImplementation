@@ -487,6 +487,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
         function NetReliableMessage(original, relSeqID) {
             var _this = _super.call(this, original.type, original.payload) || this;
             _this.onAck = original.onAck;
+            _this.onResend = original.onResend;
             _this.seqID = original.seqID;
             _this.relSeqID = relSeqID;
             return _this;
@@ -691,6 +692,10 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                                 // Attach our acks
                                 toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                                 toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
+                                // Resend callback
+                                if (toResend.msg.onResend != undefined) {
+                                    toResend.msg.onResend(toResend, peer);
+                                }
                                 // Enqueue
                                 peer.sendBuffer.push(toResend.msg);
                                 peer.relSent = true;
@@ -729,6 +734,10 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                     // Attach our acks
                     toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                     toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
+                    // Resend callback
+                    if (toResend.msg.onResend != undefined) {
+                        toResend.msg.onResend(toResend, peer);
+                    }
                     // Enqueue
                     peer.sendBuffer.push(toResend.msg);
                     // peer.relSent = true; // Still send a heartbeat to keep the protocol moving
