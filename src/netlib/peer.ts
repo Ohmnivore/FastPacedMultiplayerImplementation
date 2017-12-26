@@ -4,12 +4,13 @@ import { SlidingArrayBuffer } from "./slidingBuffer";
 export class StoredNetReliableMessage {
 
     msg: NetReliableMessage;
-    timeSent: number;
+    sentTimestamp: number;
     resent = false;
+    timesAcked: number = 0;
 
-    constructor(msg: NetReliableMessage) {
+    constructor(msg: NetReliableMessage, curTimestamp: number) {
         this.msg = msg;
-        this.timeSent = +new Date();
+        this.sentTimestamp = curTimestamp;
     }
 }
 
@@ -52,9 +53,14 @@ export class NetPeer {
     protected lastReceivedTimestamp: number; // milliseconds
     protected lastReceivedTimestampSet: boolean = false;
 
+    // Stats
+    rtt: number = 0.0; // milliseconds
+    protected smoothingFactor: number;
+
     constructor() {
         // Automatically assing a unique ID
         this.id = NetPeer.curID++;
+        this.setRTTSmoothingFactor(64);
     }
 
     updateTimeout(timestamp: number) {
@@ -72,5 +78,14 @@ export class NetPeer {
         }
 
         return timestamp - this.lastReceivedTimestamp >= timeout;
+    }
+
+    updateRTT(rtt: number) {
+        // Exponential smoothing
+        this.rtt = rtt * this.smoothingFactor + this.rtt * (1.0 - this.smoothingFactor);
+    }
+
+    setRTTSmoothingFactor(factor: number) {
+        this.smoothingFactor = 2.0 / (1.0 + factor);
     }
 }

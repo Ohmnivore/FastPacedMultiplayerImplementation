@@ -88,7 +88,8 @@ export class NetHost {
             // Clear all messages for this peer, and add a
             // disconnect message
             peer.sendBuffer.splice(0);
-            this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), networkID);
+            // Timestamp is 0 because it doesn't matter for the Disconnect message type
+            this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), networkID, 0);
             peer.waitingForDisconnect = true;
         }
     }
@@ -100,7 +101,7 @@ export class NetHost {
         }
     }
 
-    enqueueSend(msg: NetMessage, toNetworkID: number) {
+    enqueueSend(msg: NetMessage, toNetworkID: number, curTimestamp: number) {
         let peer = this.peers[toNetworkID];
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
@@ -124,7 +125,7 @@ export class NetHost {
             reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
 
             // Store message
-            peer.relSentMsgs.set(reliableMsg.relSeqID, new StoredNetReliableMessage(reliableMsg));
+            peer.relSentMsgs.set(reliableMsg.relSeqID, new StoredNetReliableMessage(reliableMsg, curTimestamp));
 
             // Enqueue
             peer.sendBuffer.push(reliableMsg);
@@ -227,7 +228,24 @@ export class NetHost {
                 let idx = relSeqID % reliableMsg.relRecvBuffer.length;
 
                 if (reliableMsg.relRecvBuffer[idx] == true) {
-                    // TODO: set ping
+                    if (peer.relSentMsgs.canGet(relSeqID)) {
+                        let stored = peer.relSentMsgs.get(relSeqID);
+
+                        if (stored == undefined) {
+                            // Ignore
+                            this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                            return;
+                        }
+                        else if (stored.timesAcked == 0) {
+                            let rtt = curTimestamp - stored.sentTimestamp;
+                            peer.updateRTT(rtt);
+                            stored.timesAcked++;
+                        }
+                    }
+                    else if (relSeqID >= 0) {
+                        this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                        return;
+                    }
                 }
                 else {
                     if (peer.relSentMsgs.canGet(relSeqID)) {
@@ -238,7 +256,7 @@ export class NetHost {
                             this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
                             return;
                         }
-                        else {
+                        else if (toResend.timesAcked == 0) {
                             // Attach our acks
                             toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                             toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
@@ -279,7 +297,7 @@ export class NetHost {
 
         // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
         if (!peer.relSent) {
-            this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID);
+            this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID, curTimestamp);
         }
         peer.relSent = false;
 

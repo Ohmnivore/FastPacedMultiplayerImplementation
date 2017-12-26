@@ -356,10 +356,11 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
     "use strict";
     exports.__esModule = true;
     var StoredNetReliableMessage = /** @class */ (function () {
-        function StoredNetReliableMessage(msg) {
+        function StoredNetReliableMessage(msg, curTimestamp) {
             this.resent = false;
+            this.timesAcked = 0;
             this.msg = msg;
-            this.timeSent = +new Date();
+            this.sentTimestamp = curTimestamp;
         }
         return StoredNetReliableMessage;
     }());
@@ -386,8 +387,11 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
             // Disconnection and timeout
             this.waitingForDisconnect = false;
             this.lastReceivedTimestampSet = false;
+            // Stats
+            this.rtt = 0.0; // milliseconds
             // Automatically assing a unique ID
             this.id = NetPeer.curID++;
+            this.setRTTSmoothingFactor(64);
         }
         NetPeer.prototype.updateTimeout = function (timestamp) {
             this.lastReceivedTimestampSet = true;
@@ -402,6 +406,13 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
                 return false;
             }
             return timestamp - this.lastReceivedTimestamp >= timeout;
+        };
+        NetPeer.prototype.updateRTT = function (rtt) {
+            // Exponential smoothing
+            this.rtt = rtt * this.smoothingFactor + this.rtt * (1.0 - this.smoothingFactor);
+        };
+        NetPeer.prototype.setRTTSmoothingFactor = function (factor) {
+            this.smoothingFactor = 2.0 / (1.0 + factor);
         };
         NetPeer.curID = 0;
         return NetPeer;
@@ -524,7 +535,8 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                 // Clear all messages for this peer, and add a
                 // disconnect message
                 peer.sendBuffer.splice(0);
-                this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), networkID);
+                // Timestamp is 0 because it doesn't matter for the Disconnect message type
+                this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), networkID, 0);
                 peer.waitingForDisconnect = true;
             }
         };
@@ -534,7 +546,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                 delete this.peers[networkID];
             }
         };
-        NetHost.prototype.enqueueSend = function (msg, toNetworkID) {
+        NetHost.prototype.enqueueSend = function (msg, toNetworkID, curTimestamp) {
             var peer = this.peers[toNetworkID];
             if (peer == undefined || peer.waitingForDisconnect) {
                 return;
@@ -554,7 +566,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                 reliableMsg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                 reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
                 // Store message
-                peer.relSentMsgs.set(reliableMsg.relSeqID, new peer_1.StoredNetReliableMessage(reliableMsg));
+                peer.relSentMsgs.set(reliableMsg.relSeqID, new peer_1.StoredNetReliableMessage(reliableMsg, curTimestamp));
                 // Enqueue
                 peer.sendBuffer.push(reliableMsg);
                 peer.relSent = true;
@@ -643,7 +655,23 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                 for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
                     var idx = relSeqID % reliableMsg.relRecvBuffer.length;
                     if (reliableMsg.relRecvBuffer[idx] == true) {
-                        // TODO: set ping
+                        if (peer.relSentMsgs.canGet(relSeqID)) {
+                            var stored = peer.relSentMsgs.get(relSeqID);
+                            if (stored == undefined) {
+                                // Ignore
+                                this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                                return;
+                            }
+                            else if (stored.timesAcked == 0) {
+                                var rtt = curTimestamp - stored.sentTimestamp;
+                                peer.updateRTT(rtt);
+                                stored.timesAcked++;
+                            }
+                        }
+                        else if (relSeqID >= 0) {
+                            this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                            return;
+                        }
                     }
                     else {
                         if (peer.relSentMsgs.canGet(relSeqID)) {
@@ -653,7 +681,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                                 this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
                                 return;
                             }
-                            else {
+                            else if (toResend.timesAcked == 0) {
                                 // Attach our acks
                                 toResend.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                                 toResend.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
@@ -689,7 +717,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
             }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
             if (!peer.relSent) {
-                this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID);
+                this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID, curTimestamp);
             }
             peer.relSent = false;
             // Returns a copy of the buffer, and empties the original buffer
@@ -801,8 +829,8 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
             }
             var _loop_1 = function (i) {
                 var client = this_1.clients[i];
-                this_1.netHost.enqueueSend(new host_3.NetMessage(host_3.NetMessageType.Unreliable, worldState), client.networkID);
                 var curTimestamp = +new Date();
+                this_1.netHost.enqueueSend(new host_3.NetMessage(host_3.NetMessageType.Unreliable, worldState), client.networkID, curTimestamp);
                 this_1.netHost.getSendBuffer(client.networkID, curTimestamp).forEach(function (message) {
                     client.network.send(curTimestamp, client.recvState, message, _this.networkID);
                 });
@@ -886,6 +914,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             render_2.renderWorld(this.canvas, this.entities);
             // Show some info
             var info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
+            info += " · Ping: " + Math.round(this.netHost.peers[this.server.networkID].rtt / 2.0);
             this.status.textContent = info;
         };
         // Get inputs and send them to the server
@@ -911,7 +940,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Send the input to the server
             input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
             input.entityID = this.localEntityID;
-            this.netHost.enqueueSend(new host_5.NetMessage(host_5.NetMessageType.ReliableOrdered, input), this.server.networkID);
+            this.netHost.enqueueSend(new host_5.NetMessage(host_5.NetMessageType.ReliableOrdered, input), this.server.networkID, nowTS);
             // Do client-side prediction
             if (this.clientSidePrediction && this.localEntity != undefined) {
                 this.localEntity.applyInput(input);
@@ -1075,7 +1104,7 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host"]
                 if (this_2.keepSending) {
                     var seqID = this_2.seqID++;
                     this_2.seqIDs.push(seqID);
-                    this_2.netHost.enqueueSend(new host_7.NetMessage(this_2.msgType, seqID), client.networkID);
+                    this_2.netHost.enqueueSend(new host_7.NetMessage(this_2.msgType, seqID), client.networkID, curTimestampMS);
                 }
                 this_2.netHost.getSendBuffer(client.networkID, curTimestampMS).forEach(function (message) {
                     client.network.send(curTimestampMS, client.recvState, message, _this.networkID);

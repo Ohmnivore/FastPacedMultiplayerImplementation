@@ -89,7 +89,7 @@ export class TestServer extends Host {
                 let seqID = this.seqID++;
                 this.seqIDs.push(seqID);
 
-                this.netHost.enqueueSend(new NetMessage(this.msgType, seqID), client.networkID);
+                this.netHost.enqueueSend(new NetMessage(this.msgType, seqID), client.networkID, curTimestampMS);
             }
 
             this.netHost.getSendBuffer(client.networkID, curTimestampMS).forEach(message => {

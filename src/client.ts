@@ -70,6 +70,7 @@ export class Client extends Host {
 
         // Show some info
         let info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
+        info += " · Ping: " + Math.round(this.netHost.peers[this.server.networkID].rtt / 2.0);
         this.status.textContent = info;
     }
 
@@ -99,7 +100,7 @@ export class Client extends Host {
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
 
-        this.netHost.enqueueSend(new NetMessage(NetMessageType.ReliableOrdered, input), this.server.networkID);
+        this.netHost.enqueueSend(new NetMessage(NetMessageType.ReliableOrdered, input), this.server.networkID, nowTS);
 
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {

@@ -67,8 +67,8 @@ export class Server extends Host {
         for (let i = 0; i < numClients; i++) {
             let client = this.clients[i];
 
-            this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), client.networkID);
             let curTimestamp = +new Date();
+            this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), client.networkID, curTimestamp);
             this.netHost.getSendBuffer(client.networkID, curTimestamp).forEach(message => {
                 client.network.send(curTimestamp, client.recvState, message, this.networkID);
             });
