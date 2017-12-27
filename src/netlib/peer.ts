@@ -5,6 +5,7 @@ export class StoredNetReliableMessage {
 
     msg: NetReliableMessage;
     sentTimestamp: number;
+    rtt: number = 0;
     resent = false;
     timesAcked: number = 0;
 
@@ -56,6 +57,7 @@ export class NetPeer {
     // Stats
     rtt: number = 100; // milliseconds, assume 100 when peer connects
     protected smoothingFactor: number;
+    dropRate: number = 0.0;
 
     constructor() {
         // Automatically assing a unique ID

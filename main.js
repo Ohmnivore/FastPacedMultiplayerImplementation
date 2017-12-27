@@ -358,6 +358,7 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
     exports.__esModule = true;
     var StoredNetReliableMessage = /** @class */ (function () {
         function StoredNetReliableMessage(msg, curTimestamp) {
+            this.rtt = 0;
             this.resent = false;
             this.timesAcked = 0;
             this.msg = msg;
@@ -390,6 +391,7 @@ define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (
             this.lastReceivedTimestampSet = false;
             // Stats
             this.rtt = 100; // milliseconds, assume 100 when peer connects
+            this.dropRate = 0.0;
             // Automatically assing a unique ID
             this.id = NetPeer.curID++;
             this.setRTTSmoothingFactor(64);
@@ -668,6 +670,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                             else if (stored.timesAcked == 0) {
                                 // Update peer RTT
                                 var rtt = curTimestamp - stored.sentTimestamp;
+                                stored.rtt = rtt;
                                 peer.updateRTT(rtt);
                                 // Ack callback
                                 if (stored.msg.onAck != undefined) {
@@ -704,6 +707,31 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                         }
                     }
                 }
+                // Calculate drop rate for the past 4 seconds
+                start = peer.relSentMsgs.getHeadID();
+                end = start - peer.relSentMsgs.getMaxSize() + 1;
+                var timeInterval = 4000;
+                var threshold = peer.rtt * 1.2;
+                var n = 0;
+                var dropped = 0;
+                for (var seqID = start; seqID >= end; --seqID) {
+                    if (peer.relSentMsgs.canGet(seqID)) {
+                        var storedMsg = peer.relSentMsgs.get(seqID);
+                        if (storedMsg != undefined) {
+                            if (curTimestamp - storedMsg.sentTimestamp > timeInterval) {
+                                break;
+                            }
+                            n++;
+                            if (storedMsg.timesAcked == 0 && curTimestamp - storedMsg.sentTimestamp >= threshold) {
+                                dropped++;
+                            }
+                            else if (storedMsg.timesAcked > 0 && storedMsg.rtt >= threshold) {
+                                dropped++;
+                            }
+                        }
+                    }
+                }
+                peer.dropRate = dropped / Math.max(1, n);
             }
         };
         NetHost.prototype.getSendBuffer = function (destNetworkID, curTimestamp) {

@@ -246,6 +246,7 @@ export class NetHost {
                         else if (stored.timesAcked == 0) {
                             // Update peer RTT
                             let rtt = curTimestamp - stored.sentTimestamp;
+                            stored.rtt = rtt;
                             peer.updateRTT(rtt);
 
                             // Ack callback
@@ -286,6 +287,36 @@ export class NetHost {
                     }
                 }
             }
+
+            // Calculate drop rate for the past 4 seconds
+            start = peer.relSentMsgs.getHeadID();
+            end = start - peer.relSentMsgs.getMaxSize() + 1;
+            let timeInterval = 4000;
+            let threshold = peer.rtt * 1.2;
+            let n = 0;
+            let dropped = 0;
+
+            for (let seqID = start; seqID >= end; --seqID) {
+                if (peer.relSentMsgs.canGet(seqID)) {
+                    let storedMsg = peer.relSentMsgs.get(seqID);
+
+                    if (storedMsg != undefined) {
+                        if (curTimestamp - storedMsg.sentTimestamp > timeInterval) {
+                            break;
+                        }
+
+                        n++;
+                        if (storedMsg.timesAcked == 0 && curTimestamp - storedMsg.sentTimestamp >= threshold) {
+                            dropped++;
+                        }
+                        else if (storedMsg.timesAcked > 0 && storedMsg.rtt >= threshold) {
+                            dropped++;
+                        }
+                    }
+                }
+            }
+
+            peer.dropRate = dropped / Math.max(1, n);
         }
     }
 
