@@ -51,6 +51,7 @@ export class NetworkState {
     }
 
     randomLag(): number {
+        this.lagMax = Math.max(this.lagMax, this.lagMin);
         return Math.floor(Math.random() * (this.lagMax - this.lagMin)) + this.lagMin;
     }
 

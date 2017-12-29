@@ -12,7 +12,7 @@ export class Server extends Host {
     // Connected clients and their entities
     protected clients: Array<Client> = [];
     protected entities: ServerEntities = {};
-    protected netIDToEntity: ServerEntities = {};
+    protected peerIDToEntity: ServerEntities = {};
 
     constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
         super();
@@ -26,8 +26,8 @@ export class Server extends Host {
 
     connect(client: Client) {
         // Connect netlibs
-        client.netHost.acceptNewPeer(this.networkID);
-        this.netHost.acceptNewPeer(client.networkID);
+        client.netHost.acceptNewPeer(this.netAddress);
+        let peer = this.netHost.acceptNewPeer(client.netAddress);
 
         // Give the Client enough data to identify itself
         client.server = this;
@@ -37,7 +37,7 @@ export class Server extends Host {
         // Create a new Entity for this Client
         let entity = new ServerEntity();
         this.entities[client.localEntityID] = entity;
-        this.netIDToEntity[client.networkID] = entity;
+        this.peerIDToEntity[peer.id] = entity;
         entity.entityID = client.localEntityID;
       
         // Set the initial state of the Entity (e.g. spawn point)
@@ -66,12 +66,15 @@ export class Server extends Host {
         // Broadcast the state to all the clients
         for (let i = 0; i < numClients; i++) {
             let client = this.clients[i];
+            let peer = this.netHost.getPeerByAddress(client.netAddress);
 
-            let curTimestamp = +new Date();
-            this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), client.networkID, curTimestamp);
-            this.netHost.getSendBuffer(client.networkID, curTimestamp).forEach(message => {
-                client.network.send(curTimestamp, client.recvState, message, this.networkID);
-            });
+            if (peer != undefined) {
+                let curTimestamp = +new Date();
+                this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), peer.id, curTimestamp);
+                this.netHost.getSendBuffer(peer.id, curTimestamp).forEach(message => {
+                    client.network.send(curTimestamp, client.recvState, message, this.netAddress.getID());
+                });
+            }
         }
     }
 
@@ -93,8 +96,14 @@ export class Server extends Host {
         this.status.textContent = info;
     }
 
-    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage | undefined) {
-        NetEventUtils.defaultHandler(host, peer, error, msg);
-        this.netIDToEntity[peer.networkID].connected = false;
+    protected netEventHandler(host: NetHost, peer: NetPeer, event: NetEvent, msg: NetMessage | undefined) {
+        NetEventUtils.defaultHandler(host, peer, event, msg);
+
+        if (event == NetEvent.ConnectionEstablished) {
+            
+        }
+        else {
+            this.peerIDToEntity[peer.id].connected = false;
+        }
     }
 }

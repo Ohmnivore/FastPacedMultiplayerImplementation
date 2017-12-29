@@ -1,12 +1,12 @@
 import { LagNetwork } from "./lagNetwork";
-import { NetHost, NetIncomingMessage } from "./netlib/host";
+import { NetHost, NetIncomingMessage, NetAddress, NetSimpleAddress } from "./netlib/host";
 
 export class Host {
 
     // Simulated network connection
     netHost: NetHost = new NetHost();
     network: LagNetwork = new LagNetwork();
-    networkID: number; // Unique ID per host (IP address + port abstraction)
+    netAddress: NetAddress; // Unique ID per host (IP address + port abstraction)
     protected static curID = 0;
 
     // Update timer
@@ -23,7 +23,7 @@ export class Host {
         this.status = status;
 
         // Automatically assing a unique ID
-        this.networkID = Host.curID++;
+        this.netAddress = new NetSimpleAddress(Host.curID++);
     }
 
     setUpdateRate(hz: number) {
@@ -55,7 +55,7 @@ export class Host {
         // NetHost can discard a message or put one on hold until
         // an earlier one arrives.
         messages.forEach(message => {
-            this.netHost.enqueueRecv(message.payload, message.fromNetworkID, timestamp);
+            this.netHost.enqueueRecv(message.payload, new NetSimpleAddress(message.fromNetworkID), timestamp);
         });
 
         return this.netHost.getRecvBuffer();

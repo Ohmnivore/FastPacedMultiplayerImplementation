@@ -1,7 +1,7 @@
 import { NetHost, NetMessage } from "./host";
 import { NetPeer } from "./peer";
 
-export type NetEventHandler = (host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage | undefined) => void;
+export type NetEventHandler = (host: NetHost, peer: NetPeer, event: NetEvent, msg: NetMessage | undefined) => void;
 
 export enum NetEvent {
 
@@ -10,7 +10,8 @@ export enum NetEvent {
     ReliableRecvBufferOverflow,
     ReliableSendBufferOverrun,
     DisconnectRecv,
-    Timeout
+    Timeout,
+    ConnectionEstablished
 }
 
 export class NetEventUtils {
@@ -31,14 +32,19 @@ export class NetEventUtils {
         else if (error == NetEvent.DisconnectRecv) {
             return "Disconnect request received";
         }
-        else {
-            // NetEvent.Timeout
+        else if (error == NetEvent.Timeout) {
             return "Timeout";
+        }
+        else {
+            // NetEvent.ConnectionEstablished
+            return "Connection established";
         }
     }
 
-    static defaultHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage | undefined) {
-        console.log("netlib event: [" + NetEventUtils.getEventString(error) + "] on networkID: [" + peer.networkID + "] ID: [" + peer.id + "]");
-        host.disconnectPeer(peer.networkID);
+    static defaultHandler(host: NetHost, peer: NetPeer, event: NetEvent, msg: NetMessage | undefined) {
+        if (event != NetEvent.ConnectionEstablished) {
+            console.log("netlib event: [" + NetEventUtils.getEventString(event) + "] on address: [" + peer.address + "] ID: [" + peer.id + "]");
+            host.disconnectPeer(peer.id);
+        }
     }
 }

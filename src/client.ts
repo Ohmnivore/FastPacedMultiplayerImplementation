@@ -26,6 +26,7 @@ export class Client extends Host {
     server: Server;
     sendState: NetworkState = new NetworkState();
     recvState: NetworkState = new NetworkState();
+    serverPeerID: number;
 
     // Toggle options
     clientSidePrediction: boolean = false;
@@ -56,8 +57,8 @@ export class Client extends Host {
 
         // Send messages
         let curTimestamp = +new Date();
-        this.netHost.getSendBuffer(this.server.networkID, curTimestamp).forEach(message => {
-            this.server.network.send(curTimestamp, this.sendState, message, this.networkID);
+        this.netHost.getSendBuffer(this.serverPeerID, curTimestamp).forEach(message => {
+            this.server.network.send(curTimestamp, this.sendState, message, this.netAddress.getID());
         });
 
         // Interpolate other entities
@@ -70,7 +71,7 @@ export class Client extends Host {
 
         // Show some info
         let info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
-        let peerServer = this.netHost.peers[this.server.networkID];
+        let peerServer = this.netHost.getPeerByAddress(this.server.netAddress);
         if (peerServer != undefined) {
             info += " · Ping: " + Math.round(peerServer.rtt);
         }
@@ -103,7 +104,7 @@ export class Client extends Host {
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
 
-        this.netHost.enqueueSend(new NetMessage(NetMessageType.ReliableOrdered, input), this.server.networkID, nowTS);
+        this.netHost.enqueueSend(new NetMessage(NetMessageType.ReliableOrdered, input), this.serverPeerID, nowTS);
 
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {
@@ -201,10 +202,16 @@ export class Client extends Host {
         }
     }
 
-    protected netEventHandler(host: NetHost, peer: NetPeer, error: NetEvent, msg: NetMessage | undefined) {
-        NetEventUtils.defaultHandler(host, peer, error, msg);
-        for (let entityID in this.entities) {
-            this.entities[entityID].connected = false;
+    protected netEventHandler(host: NetHost, peer: NetPeer, event: NetEvent, msg: NetMessage | undefined) {
+        NetEventUtils.defaultHandler(host, peer, event, msg);
+
+        if (event == NetEvent.ConnectionEstablished) {
+            this.serverPeerID = peer.id;
+        }
+        else {
+            for (let entityID in this.entities) {
+                this.entities[entityID].connected = false;
+            }
         }
     }
 }

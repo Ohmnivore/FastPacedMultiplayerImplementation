@@ -1,6 +1,28 @@
 import { NetPeer, StoredNetReliableMessage } from "./peer";
 import { NetEventHandler, NetEventUtils, NetEvent } from "./event";
 
+export interface NetAddress {
+
+    getID(): number;
+}
+
+export class NetSimpleAddress implements NetAddress {
+
+    protected netID: number;
+
+    constructor(netID: number) {
+        this.netID = netID;
+    }
+
+    getID(): number {
+        return this.netID;
+    }
+
+    toString(): string {
+        return "" + this.netID;
+    }
+}
+
 export enum NetMessageType {
 
     Unreliable,
@@ -68,13 +90,14 @@ export class NetIncomingMessage extends NetMessage {
 export class NetHost {
 
     debug: boolean = false;
-
-    // Mapping peers by their networkID
-    peers: { [Key: number]: NetPeer } = {};
-
     eventHandler: NetEventHandler;
-
     timeoutSeconds: number = 5.0;
+
+    // Mapping peers by their network ID
+    protected peersNetID: { [Key: number]: NetPeer } = {};
+
+    // Mapping peers by their internal ID
+    protected peersID: { [Key: number]: NetPeer } = {};
 
     protected recvBuffer: Array<NetIncomingMessage> = [];
 
@@ -82,34 +105,45 @@ export class NetHost {
         this.eventHandler = NetEventUtils.defaultHandler;
     }
 
-    acceptNewPeer(networkID: number): NetPeer {
+    getPeerByAddress(address: NetAddress): NetPeer | undefined {
+        return this.peersNetID[address.getID()];
+    }
+
+    getPeerByID(id: number): NetPeer | undefined {
+        return this.peersID[id];
+    }
+
+    acceptNewPeer(address: NetAddress): NetPeer {
         let newPeer = new NetPeer();
-        newPeer.networkID = networkID;
-        this.peers[networkID] = newPeer;
+        newPeer.address = address;
+        this.peersNetID[address.getID()] = newPeer;
+        this.peersID[newPeer.id] = newPeer;
+        this.eventHandler(this, newPeer, NetEvent.ConnectionEstablished, undefined);
         return newPeer;
     }
 
-    disconnectPeer(networkID: number) {
-        let peer = this.peers[networkID];
+    disconnectPeer(id: number) {
+        let peer = this.peersID[id];
         if (peer != undefined && !peer.waitingForDisconnect) {
             // Clear all messages for this peer, and add a
             // disconnect message
             peer.sendBuffer.splice(0);
             // Timestamp is 0 because it doesn't matter for the Disconnect message type
-            this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), networkID, 0);
+            this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), id, 0);
             peer.waitingForDisconnect = true;
         }
     }
 
-    protected finalDisconnectPeer(networkID: number) {
-        let peer = this.peers[networkID];
+    protected finalDisconnectPeer(id: number) {
+        let peer = this.peersID[id];
         if (peer != undefined) {
-            delete this.peers[networkID];
+            delete this.peersNetID[peer.address.getID()];
+            delete this.peersID[id];
         }
     }
 
-    enqueueSend(msg: NetMessage, toNetworkID: number, curTimestamp: number) {
-        let peer = this.peers[toNetworkID];
+    enqueueSend(msg: NetMessage, toID: number, curTimestamp: number) {
+        let peer = this.peersID[toID];
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
@@ -140,8 +174,8 @@ export class NetHost {
         }
     }
 
-    enqueueRecv(msg: NetMessage, fromNetworkID: number, curTimestamp: number) {
-        let peer = this.peers[fromNetworkID];
+    enqueueRecv(msg: NetMessage, from: NetAddress, curTimestamp: number) {
+        let peer = this.peersNetID[from.getID()];
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
@@ -179,7 +213,7 @@ export class NetHost {
         }
         else if (incomingMsg.type == NetMessageType.Disconnect) {
             this.eventHandler(this, peer, NetEvent.DisconnectRecv, incomingMsg);
-            this.finalDisconnectPeer(fromNetworkID);
+            this.finalDisconnectPeer(peer.id);
         }
         else {
             let reliableMsg = msg as NetReliableMessage;
@@ -320,8 +354,8 @@ export class NetHost {
         }
     }
 
-    getSendBuffer(destNetworkID: number, curTimestamp: number): Array<NetMessage> {
-        let peer = this.peers[destNetworkID];
+    getSendBuffer(toID: number, curTimestamp: number): Array<NetMessage> {
+        let peer = this.peersID[toID];
         if (peer == undefined) {
             return [];
         }
@@ -329,14 +363,14 @@ export class NetHost {
         // Check if the peer has timed out, disconnect if he has
         if (peer.hasTimedOut(curTimestamp, Math.round(this.timeoutSeconds * 1000.0))) {
             this.eventHandler(this, peer, NetEvent.Timeout, undefined);
-            this.disconnectPeer(destNetworkID);
+            this.disconnectPeer(peer.id);
         }
 
         // If the peer is scheduled for disconnection,
         // disconnect him and send the disconnection message
         if (peer.waitingForDisconnect) {
             let ret = peer.sendBuffer.splice(0);
-            this.finalDisconnectPeer(destNetworkID);
+            this.finalDisconnectPeer(peer.id);
             return ret;
         }
 
@@ -358,7 +392,7 @@ export class NetHost {
 
         // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
         if (!peer.relSent) {
-            this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), destNetworkID, curTimestamp);
+            this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), peer.id, curTimestamp);
         }
         peer.relSent = false;
 

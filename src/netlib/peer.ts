@@ -1,5 +1,6 @@
 import { NetMessage, NetReliableMessage, NetIncomingMessage } from "./host";
 import { SlidingArrayBuffer } from "./slidingBuffer";
+import { NetAddress } from "./host";
 
 export class StoredNetReliableMessage {
 
@@ -18,7 +19,7 @@ export class StoredNetReliableMessage {
 export class NetPeer {
 
     // Abstraction for IP address + port
-    networkID: number;
+    address: NetAddress;
 
     // Unique ID
     id: number;

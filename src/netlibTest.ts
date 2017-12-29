@@ -1,6 +1,7 @@
 import { Host } from "./host";
 import { NetworkState } from "./lagNetwork";
 import { NetMessage, NetMessageType } from "./netlib/host";
+import { NetSimpleAddress } from "./netlib/host";
 
 class FrameRateLimiter {
 
@@ -50,7 +51,8 @@ class FrameRateLimiter {
 
 export class TestServer extends Host {
     // Connected clients and their entities
-    protected clients: Array<TestClient> = [];
+    protected client: TestClient;
+    peerID: number;
 
     fps: FrameRateLimiter;
 
@@ -64,17 +66,17 @@ export class TestServer extends Host {
         this.fps = new FrameRateLimiter(fps);
 
         // Automatically assing a unique ID
-        this.networkID = Host.curID++;
+        this.netAddress = new NetSimpleAddress(Host.curID++);
     }
 
     connect(client: TestClient) {
         // Connect netlibs
-        client.netHost.acceptNewPeer(this.networkID);
-        this.netHost.acceptNewPeer(client.networkID);
+        client.peerID = client.netHost.acceptNewPeer(this.netAddress).id;
+        this.peerID = this.netHost.acceptNewPeer(client.netAddress).id;
 
         // Give the Client enough data to identify itself
         client.server = this;
-        this.clients.push(client);
+        this.client = client;
     }
 
     update() {
@@ -82,20 +84,16 @@ export class TestServer extends Host {
 
         this.pollMessages(curTimestampMS);
 
-        for (let i = 0; i < this.clients.length; i++) {
-            let client = this.clients[i];
+        if (this.keepSending) {
+            let seqID = this.seqID++;
+            this.seqIDs.push(seqID);
 
-            if (this.keepSending) {
-                let seqID = this.seqID++;
-                this.seqIDs.push(seqID);
-
-                this.netHost.enqueueSend(new NetMessage(this.msgType, seqID), client.networkID, curTimestampMS);
-            }
-
-            this.netHost.getSendBuffer(client.networkID, curTimestampMS).forEach(message => {
-                client.network.send(curTimestampMS, client.recvState, message, this.networkID);
-            });
+            this.netHost.enqueueSend(new NetMessage(this.msgType, seqID), this.peerID, curTimestampMS);
         }
+
+        this.netHost.getSendBuffer(this.peerID, curTimestampMS).forEach(message => {
+            this.client.network.send(curTimestampMS, this.client.recvState, message, this.netAddress.getID());
+        });
     }
 }
 
@@ -105,6 +103,7 @@ export class TestClient extends Host {
     server: TestServer;
     sendState: NetworkState = new NetworkState();
     recvState: NetworkState = new NetworkState();
+    peerID: number;
 
     fps: FrameRateLimiter;
 
@@ -116,7 +115,7 @@ export class TestClient extends Host {
         this.fps = new FrameRateLimiter(fps);
 
         // Automatically assing a unique ID
-        this.networkID = Host.curID++;
+        this.netAddress = new NetSimpleAddress(Host.curID++);
     }
 
     update() {
@@ -135,8 +134,8 @@ export class TestClient extends Host {
         });
 
         // Send messages
-        this.netHost.getSendBuffer(this.server.networkID, curTimestampMS).forEach(message => {
-            this.server.network.send(curTimestampMS, this.sendState, message, this.networkID);
+        this.netHost.getSendBuffer(this.peerID, curTimestampMS).forEach(message => {
+            this.server.network.send(curTimestampMS, this.sendState, message, this.netAddress.getID());
         });
     }
 
