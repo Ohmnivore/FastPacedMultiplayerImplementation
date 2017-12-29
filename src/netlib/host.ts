@@ -1,6 +1,6 @@
-import { NetPeer } from "./peer";
 import { NetEventHandler, NetEventUtils, NetEvent } from "./event";
-import { NetIncomingMessage, NetDisconnectMessage, NetMessage, NetMessageType, NetReliableHeartbeatMessage, NetReliableMessage, NetReliableOrderedMessage, NetStoredReliableMessage } from "./message";
+import { NetIncomingMessage, NetMessage, NetMessageType, NetReliableMessage, NetReliableOrderedMessage, NetUnreliableMessage, NetStoredReliableMessage } from "./message";
+import { SlidingArrayBuffer } from "./slidingBuffer";
 
 export interface NetAddress {
 
@@ -21,6 +21,128 @@ export class NetSimpleAddress implements NetAddress {
 
     toString(): string {
         return "" + this.netID;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// NetPeer
+
+export interface NetPeer {
+
+    // Abstraction for IP address + port
+    address: NetAddress;
+
+    // Unique ID
+    id: number;
+
+    // Stats
+    getRTT(): number; // milliseconds, assume 100 when peer connects
+    getDropRate(): number;
+    setRTTSmoothingFactor(factor: number): void;
+}
+
+class NetPeerInternal implements NetPeer {
+
+    // Abstraction for IP address + port
+    address: NetAddress;
+
+    // Unique ID
+    id: number;
+    protected static curID = 0;
+
+    // To allow other peers to detect duplicates
+    msgSeqID: number = 0;
+
+    // The received seqIDs from this peer, to detect duplicates
+    recvSeqIDs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(1024, (idx: number) => false);
+
+    // Sequence number for reliability algorithm
+    relSeqID: number = 0;
+
+    // The reliable messages sent to this peer
+    relSentMsgs: SlidingArrayBuffer<NetStoredReliableMessage> = new SlidingArrayBuffer(1024, (idx: number): (NetStoredReliableMessage | undefined) => undefined);
+
+    // The reliable messages received from this peer
+    relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(256, (idx: number) => false);
+
+    // Packets are re-ordered here
+    relRecvOrderMsgs: SlidingArrayBuffer<NetIncomingMessage> = new SlidingArrayBuffer(2048, (idx: number): (NetIncomingMessage | undefined) => undefined);
+    relRecvOrderStartSeqID: number = 0;
+    relOrderSeqID: number = 0;
+
+    // Flag indicates if this peer was sent a reliable message this frame
+    relSent: boolean = false;
+
+    sendBuffer: Array<any> = [];
+
+    // Disconnection and timeout
+    waitingForDisconnect: boolean = false;
+    protected lastReceivedTimestamp: number; // milliseconds
+    protected lastReceivedTimestampSet: boolean = false;
+
+    // Stats
+    rtt: number = 100; // milliseconds, assume 100 when peer connects
+    protected smoothingFactor: number;
+    dropRate: number = 0.0;
+
+    constructor() {
+        // Automatically assing a unique ID
+        this.id = NetPeerInternal.curID++;
+        this.setRTTSmoothingFactor(64);
+    }
+
+    updateTimeout(timestamp: number) {
+        this.lastReceivedTimestampSet = true;
+        this.lastReceivedTimestamp = timestamp;
+    }
+
+    hasTimedOut(timestamp: number, timeout: number): boolean {
+        // In case we never receive a message at all, we need
+        // to also set this here
+        if (!this.lastReceivedTimestampSet) {
+            this.lastReceivedTimestampSet = true;
+            this.lastReceivedTimestamp = timestamp;
+            return false;
+        }
+
+        return timestamp - this.lastReceivedTimestamp >= timeout;
+    }
+
+    updateRTT(rtt: number) {
+        // Exponential smoothing
+        this.rtt = rtt * this.smoothingFactor + this.rtt * (1.0 - this.smoothingFactor);
+    }
+
+    getRTT() {
+        return this.rtt;
+    }
+
+    getDropRate() {
+        return this.dropRate;
+    }
+
+    setRTTSmoothingFactor(factor: number) {
+        this.smoothingFactor = 2.0 / (1.0 + factor);
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// NetHost
+
+class NetReliableHeartbeatMessage extends NetReliableMessage {
+
+    constructor() {
+        super(undefined);
+        this.type = NetMessageType.ReliableHeartbeat;
+    }
+}
+
+class NetDisconnectMessage extends NetUnreliableMessage {
+
+    constructor() {
+        super(undefined);
+        this.type = NetMessageType.Disconnect;
     }
 }
 
@@ -51,7 +173,7 @@ export class NetHost {
     }
 
     acceptNewPeer(address: NetAddress): NetPeer {
-        let newPeer = new NetPeer();
+        let newPeer = new NetPeerInternal();
         newPeer.address = address;
         this.peersNetID[address.getID()] = newPeer;
         this.peersID[newPeer.id] = newPeer;
@@ -60,7 +182,7 @@ export class NetHost {
     }
 
     disconnectPeer(id: number) {
-        let peer = this.peersID[id];
+        let peer = this.peersID[id] as NetPeerInternal;
         if (peer != undefined && !peer.waitingForDisconnect) {
             // Clear all messages for this peer, and add a
             // disconnect message
@@ -80,7 +202,7 @@ export class NetHost {
     }
 
     enqueueSend(msg: NetMessage, toID: number, curTimestamp: number) {
-        let peer = this.peersID[toID];
+        let peer = this.peersID[toID] as NetPeerInternal;
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
@@ -116,7 +238,7 @@ export class NetHost {
     }
 
     enqueueRecv(msg: any, from: NetAddress, curTimestamp: number) {
-        let peer = this.peersNetID[from.getID()];
+        let peer = this.peersNetID[from.getID()] as NetPeerInternal;
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
@@ -302,7 +424,7 @@ export class NetHost {
     }
 
     getSendBuffer(toID: number, curTimestamp: number): Array<NetMessage> {
-        let peer = this.peersID[toID];
+        let peer = this.peersID[toID] as NetPeerInternal;
         if (peer == undefined) {
             return [];
         }

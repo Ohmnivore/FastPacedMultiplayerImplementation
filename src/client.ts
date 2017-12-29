@@ -3,8 +3,7 @@ import { LagNetwork, NetworkState } from "./lagNetwork";
 import { renderWorld } from "./render";
 import { Server } from "./server";
 import { Host } from "./host";
-import { NetHost } from "./netlib/host";
-import { NetPeer } from "./netlib/peer";
+import { NetHost, NetPeer } from "./netlib/host";
 import { NetEvent, NetEventUtils } from "./netlib/event";
 import { NetReliableOrderedMessage, NetMessage } from "./netlib/message";
 
@@ -74,7 +73,7 @@ export class Client extends Host {
         let info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
         let peerServer = this.netHost.getPeerByAddress(this.server.netAddress);
         if (peerServer != undefined) {
-            info += " · Ping: " + Math.round(peerServer.rtt);
+            info += " · Ping: " + Math.round(peerServer.getRTT());
         }
         this.status.textContent = info;
     }

@@ -286,74 +286,6 @@ define("render", ["require", "exports"], function (require, exports) {
     }
     exports.renderWorld = renderWorld;
 });
-define("netlib/slidingBuffer", ["require", "exports"], function (require, exports) {
-    "use strict";
-    exports.__esModule = true;
-    // Circular buffer
-    var SlidingArrayBuffer = /** @class */ (function () {
-        function SlidingArrayBuffer(maxSize, fillFunction) {
-            if (maxSize === void 0) { maxSize = 32; }
-            this.initialized = false;
-            this.tailID = 0;
-            this.headID = -1;
-            this.buffer = [];
-            this.maxSize = maxSize;
-            this.fillFunction = fillFunction;
-            for (var idx = 0; idx < this.maxSize; ++idx) {
-                this.buffer.push(fillFunction(idx));
-            }
-        }
-        SlidingArrayBuffer.prototype.getHeadID = function () {
-            return this.headID;
-        };
-        SlidingArrayBuffer.prototype.getMaxSize = function () {
-            return this.maxSize;
-        };
-        SlidingArrayBuffer.prototype.set = function (id, value) {
-            if (id > this.headID) {
-                // Reset the values that just went from tail to head
-                for (var seq = this.headID + 1; seq <= id; ++seq) {
-                    var idx_1 = seq % this.maxSize;
-                    this.buffer[idx_1] = this.fillFunction(seq);
-                }
-                // Update the most recently sent ID
-                this.headID = id;
-            }
-            var idx = id % this.maxSize;
-            this.buffer[idx] = value;
-            this.tailID = Math.min(this.tailID, id);
-            this.tailID = Math.max(this.tailID, this.headID - this.maxSize + 1);
-            this.initialized = true;
-        };
-        SlidingArrayBuffer.prototype.isNew = function (id) {
-            return id > this.headID;
-        };
-        SlidingArrayBuffer.prototype.canSet = function (id) {
-            if (!this.initialized) {
-                return true;
-            }
-            return this.headID - id < this.maxSize;
-        };
-        SlidingArrayBuffer.prototype.canGet = function (id) {
-            if (!this.initialized) {
-                return false;
-            }
-            if (id < this.tailID) {
-                return false;
-            }
-            return id <= this.headID;
-        };
-        SlidingArrayBuffer.prototype.get = function (id) {
-            var idx = id % this.maxSize;
-            return this.buffer[idx];
-        };
-        SlidingArrayBuffer.prototype.cloneBuffer = function () {
-            return this.buffer.slice(0);
-        };
-        return SlidingArrayBuffer;
-    }());
-    exports.SlidingArrayBuffer = SlidingArrayBuffer;
-});
 define("netlib/message", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.__esModule = true;
@@ -458,26 +390,6 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
         return NetReliableOrderedMessage;
     }(NetReliableMessage));
     exports.NetReliableOrderedMessage = NetReliableOrderedMessage;
-    var NetReliableHeartbeatMessage = /** @class */ (function (_super) {
-        __extends(NetReliableHeartbeatMessage, _super);
-        function NetReliableHeartbeatMessage() {
-            var _this = _super.call(this, undefined) || this;
-            _this.type = NetMessageType.ReliableHeartbeat;
-            return _this;
-        }
-        return NetReliableHeartbeatMessage;
-    }(NetReliableMessage));
-    exports.NetReliableHeartbeatMessage = NetReliableHeartbeatMessage;
-    var NetDisconnectMessage = /** @class */ (function (_super) {
-        __extends(NetDisconnectMessage, _super);
-        function NetDisconnectMessage() {
-            var _this = _super.call(this, undefined) || this;
-            _this.type = NetMessageType.Disconnect;
-            return _this;
-        }
-        return NetDisconnectMessage;
-    }(NetUnreliableMessage));
-    exports.NetDisconnectMessage = NetDisconnectMessage;
     var NetIncomingMessage = /** @class */ (function (_super) {
         __extends(NetIncomingMessage, _super);
         function NetIncomingMessage(fromPeerID) {
@@ -499,64 +411,6 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
         return NetStoredReliableMessage;
     }());
     exports.NetStoredReliableMessage = NetStoredReliableMessage;
-});
-define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (require, exports, slidingBuffer_1) {
-    "use strict";
-    exports.__esModule = true;
-    var NetPeer = /** @class */ (function () {
-        function NetPeer() {
-            // To allow other peers to detect duplicates
-            this.msgSeqID = 0;
-            // The received seqIDs from this peer, to detect duplicates
-            this.recvSeqIDs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return false; });
-            // Sequence number for reliability algorithm
-            this.relSeqID = 0;
-            // The reliable messages sent to this peer
-            this.relSentMsgs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return undefined; });
-            // The reliable messages received from this peer
-            this.relRecvMsgs = new slidingBuffer_1.SlidingArrayBuffer(256, function (idx) { return false; });
-            // Packets are re-ordered here
-            this.relRecvOrderMsgs = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return undefined; });
-            this.relRecvOrderStartSeqID = 0;
-            this.relOrderSeqID = 0;
-            // Flag indicates if this peer was sent a reliable message this frame
-            this.relSent = false;
-            this.sendBuffer = [];
-            // Disconnection and timeout
-            this.waitingForDisconnect = false;
-            this.lastReceivedTimestampSet = false;
-            // Stats
-            this.rtt = 100; // milliseconds, assume 100 when peer connects
-            this.dropRate = 0.0;
-            // Automatically assing a unique ID
-            this.id = NetPeer.curID++;
-            this.setRTTSmoothingFactor(64);
-        }
-        NetPeer.prototype.updateTimeout = function (timestamp) {
-            this.lastReceivedTimestampSet = true;
-            this.lastReceivedTimestamp = timestamp;
-        };
-        NetPeer.prototype.hasTimedOut = function (timestamp, timeout) {
-            // In case we never receive a message at all, we need
-            // to also set this here
-            if (!this.lastReceivedTimestampSet) {
-                this.lastReceivedTimestampSet = true;
-                this.lastReceivedTimestamp = timestamp;
-                return false;
-            }
-            return timestamp - this.lastReceivedTimestamp >= timeout;
-        };
-        NetPeer.prototype.updateRTT = function (rtt) {
-            // Exponential smoothing
-            this.rtt = rtt * this.smoothingFactor + this.rtt * (1.0 - this.smoothingFactor);
-        };
-        NetPeer.prototype.setRTTSmoothingFactor = function (factor) {
-            this.smoothingFactor = 2.0 / (1.0 + factor);
-        };
-        NetPeer.curID = 0;
-        return NetPeer;
-    }());
-    exports.NetPeer = NetPeer;
 });
 define("netlib/event", ["require", "exports"], function (require, exports) {
     "use strict";
@@ -608,7 +462,75 @@ define("netlib/event", ["require", "exports"], function (require, exports) {
     }());
     exports.NetEventUtils = NetEventUtils;
 });
-define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event", "netlib/message"], function (require, exports, peer_1, event_1, message_1) {
+define("netlib/slidingBuffer", ["require", "exports"], function (require, exports) {
+    "use strict";
+    exports.__esModule = true;
+    // Circular buffer
+    var SlidingArrayBuffer = /** @class */ (function () {
+        function SlidingArrayBuffer(maxSize, fillFunction) {
+            if (maxSize === void 0) { maxSize = 32; }
+            this.initialized = false;
+            this.tailID = 0;
+            this.headID = -1;
+            this.buffer = [];
+            this.maxSize = maxSize;
+            this.fillFunction = fillFunction;
+            for (var idx = 0; idx < this.maxSize; ++idx) {
+                this.buffer.push(fillFunction(idx));
+            }
+        }
+        SlidingArrayBuffer.prototype.getHeadID = function () {
+            return this.headID;
+        };
+        SlidingArrayBuffer.prototype.getMaxSize = function () {
+            return this.maxSize;
+        };
+        SlidingArrayBuffer.prototype.set = function (id, value) {
+            if (id > this.headID) {
+                // Reset the values that just went from tail to head
+                for (var seq = this.headID + 1; seq <= id; ++seq) {
+                    var idx_1 = seq % this.maxSize;
+                    this.buffer[idx_1] = this.fillFunction(seq);
+                }
+                // Update the most recently sent ID
+                this.headID = id;
+            }
+            var idx = id % this.maxSize;
+            this.buffer[idx] = value;
+            this.tailID = Math.min(this.tailID, id);
+            this.tailID = Math.max(this.tailID, this.headID - this.maxSize + 1);
+            this.initialized = true;
+        };
+        SlidingArrayBuffer.prototype.isNew = function (id) {
+            return id > this.headID;
+        };
+        SlidingArrayBuffer.prototype.canSet = function (id) {
+            if (!this.initialized) {
+                return true;
+            }
+            return this.headID - id < this.maxSize;
+        };
+        SlidingArrayBuffer.prototype.canGet = function (id) {
+            if (!this.initialized) {
+                return false;
+            }
+            if (id < this.tailID) {
+                return false;
+            }
+            return id <= this.headID;
+        };
+        SlidingArrayBuffer.prototype.get = function (id) {
+            var idx = id % this.maxSize;
+            return this.buffer[idx];
+        };
+        SlidingArrayBuffer.prototype.cloneBuffer = function () {
+            return this.buffer.slice(0);
+        };
+        return SlidingArrayBuffer;
+    }());
+    exports.SlidingArrayBuffer = SlidingArrayBuffer;
+});
+define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "netlib/slidingBuffer"], function (require, exports, event_1, message_1, slidingBuffer_1) {
     "use strict";
     exports.__esModule = true;
     var NetSimpleAddress = /** @class */ (function () {
@@ -624,6 +546,85 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event", "net
         return NetSimpleAddress;
     }());
     exports.NetSimpleAddress = NetSimpleAddress;
+    var NetPeerInternal = /** @class */ (function () {
+        function NetPeerInternal() {
+            // To allow other peers to detect duplicates
+            this.msgSeqID = 0;
+            // The received seqIDs from this peer, to detect duplicates
+            this.recvSeqIDs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return false; });
+            // Sequence number for reliability algorithm
+            this.relSeqID = 0;
+            // The reliable messages sent to this peer
+            this.relSentMsgs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return undefined; });
+            // The reliable messages received from this peer
+            this.relRecvMsgs = new slidingBuffer_1.SlidingArrayBuffer(256, function (idx) { return false; });
+            // Packets are re-ordered here
+            this.relRecvOrderMsgs = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return undefined; });
+            this.relRecvOrderStartSeqID = 0;
+            this.relOrderSeqID = 0;
+            // Flag indicates if this peer was sent a reliable message this frame
+            this.relSent = false;
+            this.sendBuffer = [];
+            // Disconnection and timeout
+            this.waitingForDisconnect = false;
+            this.lastReceivedTimestampSet = false;
+            // Stats
+            this.rtt = 100; // milliseconds, assume 100 when peer connects
+            this.dropRate = 0.0;
+            // Automatically assing a unique ID
+            this.id = NetPeerInternal.curID++;
+            this.setRTTSmoothingFactor(64);
+        }
+        NetPeerInternal.prototype.updateTimeout = function (timestamp) {
+            this.lastReceivedTimestampSet = true;
+            this.lastReceivedTimestamp = timestamp;
+        };
+        NetPeerInternal.prototype.hasTimedOut = function (timestamp, timeout) {
+            // In case we never receive a message at all, we need
+            // to also set this here
+            if (!this.lastReceivedTimestampSet) {
+                this.lastReceivedTimestampSet = true;
+                this.lastReceivedTimestamp = timestamp;
+                return false;
+            }
+            return timestamp - this.lastReceivedTimestamp >= timeout;
+        };
+        NetPeerInternal.prototype.updateRTT = function (rtt) {
+            // Exponential smoothing
+            this.rtt = rtt * this.smoothingFactor + this.rtt * (1.0 - this.smoothingFactor);
+        };
+        NetPeerInternal.prototype.getRTT = function () {
+            return this.rtt;
+        };
+        NetPeerInternal.prototype.getDropRate = function () {
+            return this.dropRate;
+        };
+        NetPeerInternal.prototype.setRTTSmoothingFactor = function (factor) {
+            this.smoothingFactor = 2.0 / (1.0 + factor);
+        };
+        NetPeerInternal.curID = 0;
+        return NetPeerInternal;
+    }());
+    ///////////////////////////////////////////////////////////////////////////////
+    // NetHost
+    var NetReliableHeartbeatMessage = /** @class */ (function (_super) {
+        __extends(NetReliableHeartbeatMessage, _super);
+        function NetReliableHeartbeatMessage() {
+            var _this = _super.call(this, undefined) || this;
+            _this.type = message_1.NetMessageType.ReliableHeartbeat;
+            return _this;
+        }
+        return NetReliableHeartbeatMessage;
+    }(message_1.NetReliableMessage));
+    var NetDisconnectMessage = /** @class */ (function (_super) {
+        __extends(NetDisconnectMessage, _super);
+        function NetDisconnectMessage() {
+            var _this = _super.call(this, undefined) || this;
+            _this.type = message_1.NetMessageType.Disconnect;
+            return _this;
+        }
+        return NetDisconnectMessage;
+    }(message_1.NetUnreliableMessage));
     var NetHost = /** @class */ (function () {
         function NetHost() {
             this.debug = false;
@@ -642,7 +643,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event", "net
             return this.peersID[id];
         };
         NetHost.prototype.acceptNewPeer = function (address) {
-            var newPeer = new peer_1.NetPeer();
+            var newPeer = new NetPeerInternal();
             newPeer.address = address;
             this.peersNetID[address.getID()] = newPeer;
             this.peersID[newPeer.id] = newPeer;
@@ -656,7 +657,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event", "net
                 // disconnect message
                 peer.sendBuffer.splice(0);
                 // Timestamp is 0 because it doesn't matter for the Disconnect message type
-                this.enqueueSend(new message_1.NetDisconnectMessage(), id, 0);
+                this.enqueueSend(new NetDisconnectMessage(), id, 0);
                 peer.waitingForDisconnect = true;
             }
         };
@@ -890,7 +891,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event", "net
             }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
             if (!peer.relSent) {
-                this.enqueueSend(new message_1.NetReliableHeartbeatMessage(), peer.id, curTimestamp);
+                this.enqueueSend(new NetReliableHeartbeatMessage(), peer.id, curTimestamp);
             }
             peer.relSent = false;
             // Returns a copy of the buffer, and empties the original buffer
@@ -1096,7 +1097,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             var info = "Non-acknowledged inputs: " + this.localEntity.numberOfPendingInputs();
             var peerServer = this.netHost.getPeerByAddress(this.server.netAddress);
             if (peerServer != undefined) {
-                info += " · Ping: " + Math.round(peerServer.rtt);
+                info += " · Ping: " + Math.round(peerServer.getRTT());
             }
             this.status.textContent = info;
         };

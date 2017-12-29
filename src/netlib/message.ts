@@ -1,4 +1,4 @@
-import { NetPeer } from "./peer";
+import { NetPeer } from "./host";
 
 export enum NetMessageType {
 
@@ -114,22 +114,6 @@ export class NetReliableOrderedMessage extends NetReliableMessage {
         this.relRecvHeadID = src.relRecvHeadID;
         this.relRecvBuffer = src.relRecvBuffer;
         this.relOrderSeqID = src.relOrderSeqID;
-    }
-}
-
-export class NetReliableHeartbeatMessage extends NetReliableMessage {
-
-    constructor() {
-        super(undefined);
-        this.type = NetMessageType.ReliableHeartbeat;
-    }
-}
-
-export class NetDisconnectMessage extends NetUnreliableMessage {
-
-    constructor() {
-        super(undefined);
-        this.type = NetMessageType.Disconnect;
     }
 }
 

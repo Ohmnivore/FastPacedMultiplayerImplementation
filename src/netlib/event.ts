@@ -1,5 +1,4 @@
-import { NetHost } from "./host";
-import { NetPeer } from "./peer";
+import { NetHost, NetPeer } from "./host";
 import { NetMessage } from "./message";
 
 export type NetEventHandler = (host: NetHost, peer: NetPeer, event: NetEvent, msg: NetMessage | undefined) => void;

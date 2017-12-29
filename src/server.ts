@@ -3,8 +3,7 @@ import { LagNetwork } from "./lagNetwork";
 import { Client } from "./client";
 import { renderWorld } from "./render";
 import { Host } from "./host";
-import { NetHost } from "./netlib/host";
-import { NetPeer } from "./netlib/peer";
+import { NetHost, NetPeer } from "./netlib/host";
 import { NetEvent, NetEventUtils } from "./netlib/event";
 import { NetUnreliableMessage, NetMessage } from "./netlib/message";
 
