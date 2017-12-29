@@ -3,9 +3,10 @@ import { LagNetwork } from "./lagNetwork";
 import { Client } from "./client";
 import { renderWorld } from "./render";
 import { Host } from "./host";
-import { NetMessage, NetMessageType, NetHost } from "./netlib/host";
+import { NetHost } from "./netlib/host";
 import { NetPeer } from "./netlib/peer";
 import { NetEvent, NetEventUtils } from "./netlib/event";
+import { NetUnreliableMessage, NetMessage } from "./netlib/message";
 
 export class Server extends Host {
 
@@ -70,7 +71,7 @@ export class Server extends Host {
 
             if (peer != undefined) {
                 let curTimestamp = +new Date();
-                this.netHost.enqueueSend(new NetMessage(NetMessageType.Unreliable, worldState), peer.id, curTimestamp);
+                this.netHost.enqueueSend(new NetUnreliableMessage(worldState), peer.id, curTimestamp);
                 this.netHost.getSendBuffer(peer.id, curTimestamp).forEach(message => {
                     client.network.send(curTimestamp, client.recvState, message, this.netAddress.getID());
                 });

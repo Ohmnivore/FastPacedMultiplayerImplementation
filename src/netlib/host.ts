@@ -1,5 +1,6 @@
-import { NetPeer, StoredNetReliableMessage } from "./peer";
+import { NetPeer } from "./peer";
 import { NetEventHandler, NetEventUtils, NetEvent } from "./event";
+import { NetIncomingMessage, NetDisconnectMessage, NetMessage, NetMessageType, NetReliableHeartbeatMessage, NetReliableMessage, NetReliableOrderedMessage, NetStoredReliableMessage } from "./message";
 
 export interface NetAddress {
 
@@ -20,70 +21,6 @@ export class NetSimpleAddress implements NetAddress {
 
     toString(): string {
         return "" + this.netID;
-    }
-}
-
-export enum NetMessageType {
-
-    Unreliable,
-    Reliable,
-    ReliableOrdered,
-    ReliableHeartbeat,
-    Disconnect
-}
-
-export type NetMsgAckCallback = (msg: NetMessage, peer: NetPeer) => void;
-export type NetMsgResendCallback = (msg: StoredNetReliableMessage, peer: NetPeer) => void;
-
-export class NetMessage {
-
-    type: NetMessageType;
-    payload: any;
-    onAck: NetMsgAckCallback;
-    onResend: NetMsgResendCallback;
-    seqID: number;
-
-    constructor(type: NetMessageType, payload: any) {
-        this.type = type;
-        this.payload = payload;
-    }
-}
-
-export class NetReliableMessage extends NetMessage {
-
-    relSeqID: number;
-    relRecvHeadID: number;
-    relRecvBuffer: Array<boolean>;
-
-    constructor(original: NetMessage, relSeqID: number) {
-        super(original.type, original.payload);
-        this.onAck = original.onAck;
-        this.onResend = original.onResend;
-        this.seqID = original.seqID;
-
-        this.relSeqID = relSeqID;
-    }
-}
-
-export class NetReliableOrderedMessage extends NetReliableMessage {
-
-    relOrderSeqID: number;
-
-    constructor(original: NetReliableMessage, relOrderSeqID: number) {
-        super(original, original.relSeqID);
-        this.relOrderSeqID = relOrderSeqID;
-    }
-}
-
-export class NetIncomingMessage extends NetMessage {
-
-    fromPeerID: number;
-
-    constructor(original: NetMessage, fromPeerID: number) {
-        super(original.type, original.payload);
-        this.seqID = original.seqID;
-
-        this.fromPeerID = fromPeerID;
     }
 }
 
@@ -129,7 +66,7 @@ export class NetHost {
             // disconnect message
             peer.sendBuffer.splice(0);
             // Timestamp is 0 because it doesn't matter for the Disconnect message type
-            this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), id, 0);
+            this.enqueueSend(new NetDisconnectMessage(), id, 0);
             peer.waitingForDisconnect = true;
         }
     }
@@ -147,18 +84,22 @@ export class NetHost {
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
-        
+
+        let msgType = msg.getType();
         msg.seqID = peer.msgSeqID++;
 
-        if (msg.type == NetMessageType.Unreliable || msg.type == NetMessageType.Disconnect) {
+        if (msgType == NetMessageType.Unreliable || msgType == NetMessageType.Disconnect) {
             // No extra processing required
-            peer.sendBuffer.push(msg);
+            peer.sendBuffer.push(msg.getWireForm());
         }
         else {
             // Create a reliable message
-            let reliableMsg = new NetReliableMessage(msg, peer.relSeqID++);
-            if (reliableMsg.type == NetMessageType.ReliableOrdered) {
-                reliableMsg = new NetReliableOrderedMessage(reliableMsg, peer.relOrderSeqID++);
+            let reliableMsg = msg as NetReliableMessage;
+            reliableMsg.relSeqID = peer.relSeqID++;
+
+            if (msgType == NetMessageType.ReliableOrdered) {
+                let reliableOrderedMsg = msg as NetReliableOrderedMessage;
+                reliableOrderedMsg.relOrderSeqID = peer.relOrderSeqID++;
             }
 
             // Attach our acks
@@ -166,22 +107,25 @@ export class NetHost {
             reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
 
             // Store message
-            peer.relSentMsgs.set(reliableMsg.relSeqID, new StoredNetReliableMessage(reliableMsg, curTimestamp));
+            peer.relSentMsgs.set(reliableMsg.relSeqID, new NetStoredReliableMessage(reliableMsg, curTimestamp));
 
             // Enqueue
-            peer.sendBuffer.push(reliableMsg);
+            peer.sendBuffer.push(reliableMsg.getWireForm());
             peer.relSent = true;
         }
     }
 
-    enqueueRecv(msg: NetMessage, from: NetAddress, curTimestamp: number) {
+    enqueueRecv(msg: any, from: NetAddress, curTimestamp: number) {
         let peer = this.peersNetID[from.getID()];
         if (peer == undefined || peer.waitingForDisconnect) {
             return;
         }
         peer.updateTimeout(curTimestamp);
 
-        let incomingMsg = new NetIncomingMessage(msg, peer.id);
+        // let incomingMsg = new NetIncomingMessage(msg, peer.id);
+        let incomingMsg = new NetIncomingMessage(peer.id);
+        incomingMsg.fromWireForm(msg);
+        let msgType = incomingMsg.getType();
 
         // Detect and discard duplicates
         if (peer.recvSeqIDs.isNew(incomingMsg.seqID)) {
@@ -207,24 +151,27 @@ export class NetHost {
             }
         }
 
-        if (incomingMsg.type == NetMessageType.Unreliable) {
+        if (msgType == NetMessageType.Unreliable) {
             // No extra processing required
             this.recvBuffer.push(incomingMsg);
         }
-        else if (incomingMsg.type == NetMessageType.Disconnect) {
+        else if (msgType == NetMessageType.Disconnect) {
             this.eventHandler(this, peer, NetEvent.DisconnectRecv, incomingMsg);
             this.finalDisconnectPeer(peer.id);
         }
         else {
-            let reliableMsg = msg as NetReliableMessage;
+            let reliableMsg = new NetReliableMessage(undefined);
+            reliableMsg.fromWireForm(msg);
 
-            if (reliableMsg.type == NetMessageType.Reliable) {
+            if (msgType == NetMessageType.Reliable) {
                 // Let it be received right away
                 this.recvBuffer.push(incomingMsg);
             }
-            else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
+            else if (msgType == NetMessageType.ReliableOrdered) {
                 // Store in queue
-                let reliableOrderedMsg = reliableMsg as NetReliableOrderedMessage;
+                let reliableOrderedMsg = new NetReliableOrderedMessage(undefined);
+                reliableOrderedMsg.fromWireForm(msg);
+
                 if (peer.relRecvOrderMsgs.canSet(reliableOrderedMsg.relOrderSeqID)) {
                     peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                 }
@@ -392,7 +339,7 @@ export class NetHost {
 
         // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
         if (!peer.relSent) {
-            this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), peer.id, curTimestamp);
+            this.enqueueSend(new NetReliableHeartbeatMessage(), peer.id, curTimestamp);
         }
         peer.relSent = false;
 

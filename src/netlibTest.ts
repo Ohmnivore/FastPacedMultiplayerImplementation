@@ -1,7 +1,7 @@
 import { Host } from "./host";
 import { NetworkState } from "./lagNetwork";
-import { NetMessage, NetMessageType } from "./netlib/host";
 import { NetSimpleAddress } from "./netlib/host";
+import { NetMessageType, NetUnreliableMessage, NetReliableMessage, NetReliableOrderedMessage, NetMessage } from "./netlib/message";
 
 class FrameRateLimiter {
 
@@ -88,7 +88,18 @@ export class TestServer extends Host {
             let seqID = this.seqID++;
             this.seqIDs.push(seqID);
 
-            this.netHost.enqueueSend(new NetMessage(this.msgType, seqID), this.peerID, curTimestampMS);
+            let msg: NetMessage;
+            if (this.msgType == NetMessageType.Unreliable) {
+                msg = new NetUnreliableMessage(seqID);
+            }
+            else if (this.msgType == NetMessageType.Reliable) {
+                msg = new NetReliableMessage(seqID);
+            }
+            else {
+                msg = new NetReliableOrderedMessage(seqID);
+            }
+
+            this.netHost.enqueueSend(msg, this.peerID, curTimestampMS);
         }
 
         this.netHost.getSendBuffer(this.peerID, curTimestampMS).forEach(message => {

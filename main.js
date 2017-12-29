@@ -354,20 +354,155 @@ define("netlib/slidingBuffer", ["require", "exports"], function (require, export
     }());
     exports.SlidingArrayBuffer = SlidingArrayBuffer;
 });
-define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (require, exports, slidingBuffer_1) {
+define("netlib/message", ["require", "exports"], function (require, exports) {
     "use strict";
     exports.__esModule = true;
-    var StoredNetReliableMessage = /** @class */ (function () {
-        function StoredNetReliableMessage(msg, curTimestamp) {
+    var NetMessageType;
+    (function (NetMessageType) {
+        NetMessageType[NetMessageType["Unreliable"] = 0] = "Unreliable";
+        NetMessageType[NetMessageType["Reliable"] = 1] = "Reliable";
+        NetMessageType[NetMessageType["ReliableOrdered"] = 2] = "ReliableOrdered";
+        NetMessageType[NetMessageType["ReliableHeartbeat"] = 3] = "ReliableHeartbeat";
+        NetMessageType[NetMessageType["Disconnect"] = 4] = "Disconnect"; // For internal use
+    })(NetMessageType = exports.NetMessageType || (exports.NetMessageType = {}));
+    var NetMessage = /** @class */ (function () {
+        function NetMessage() {
+        }
+        NetMessage.prototype.getType = function () {
+            return this.type;
+        };
+        NetMessage.prototype.getWireForm = function () {
+            return {};
+        };
+        NetMessage.prototype.fromWireForm = function (src) {
+            this.type = src.type;
+            this.payload = src.payload;
+            this.seqID = src.seqID;
+        };
+        return NetMessage;
+    }());
+    exports.NetMessage = NetMessage;
+    var NetUnreliableMessage = /** @class */ (function (_super) {
+        __extends(NetUnreliableMessage, _super);
+        function NetUnreliableMessage(payload) {
+            var _this = _super.call(this) || this;
+            _this.type = NetMessageType.Unreliable;
+            _this.payload = payload;
+            return _this;
+        }
+        NetUnreliableMessage.prototype.getWireForm = function () {
+            return {
+                "type": this.type,
+                "payload": this.payload,
+                "seqID": this.seqID
+            };
+        };
+        return NetUnreliableMessage;
+    }(NetMessage));
+    exports.NetUnreliableMessage = NetUnreliableMessage;
+    var NetReliableMessage = /** @class */ (function (_super) {
+        __extends(NetReliableMessage, _super);
+        function NetReliableMessage(payload) {
+            var _this = _super.call(this, payload) || this;
+            _this.type = NetMessageType.Reliable;
+            return _this;
+        }
+        NetReliableMessage.prototype.getWireForm = function () {
+            return {
+                "type": this.type,
+                "payload": this.payload,
+                "seqID": this.seqID,
+                "relSeqID": this.relSeqID,
+                "relRecvHeadID": this.relRecvHeadID,
+                "relRecvBuffer": this.relRecvBuffer
+            };
+        };
+        NetReliableMessage.prototype.fromWireForm = function (src) {
+            this.type = src.type;
+            this.payload = src.payload;
+            this.seqID = src.seqID;
+            this.relSeqID = src.relSeqID;
+            this.relRecvHeadID = src.relRecvHeadID;
+            this.relRecvBuffer = src.relRecvBuffer;
+        };
+        return NetReliableMessage;
+    }(NetUnreliableMessage));
+    exports.NetReliableMessage = NetReliableMessage;
+    var NetReliableOrderedMessage = /** @class */ (function (_super) {
+        __extends(NetReliableOrderedMessage, _super);
+        function NetReliableOrderedMessage(payload) {
+            var _this = _super.call(this, payload) || this;
+            _this.type = NetMessageType.ReliableOrdered;
+            return _this;
+        }
+        NetReliableOrderedMessage.prototype.getWireForm = function () {
+            return {
+                "type": this.type,
+                "payload": this.payload,
+                "seqID": this.seqID,
+                "relSeqID": this.relSeqID,
+                "relRecvHeadID": this.relRecvHeadID,
+                "relRecvBuffer": this.relRecvBuffer,
+                "relOrderSeqID": this.relOrderSeqID
+            };
+        };
+        NetReliableOrderedMessage.prototype.fromWireForm = function (src) {
+            this.type = src.type;
+            this.payload = src.payload;
+            this.seqID = src.seqID;
+            this.relSeqID = src.relSeqID;
+            this.relRecvHeadID = src.relRecvHeadID;
+            this.relRecvBuffer = src.relRecvBuffer;
+            this.relOrderSeqID = src.relOrderSeqID;
+        };
+        return NetReliableOrderedMessage;
+    }(NetReliableMessage));
+    exports.NetReliableOrderedMessage = NetReliableOrderedMessage;
+    var NetReliableHeartbeatMessage = /** @class */ (function (_super) {
+        __extends(NetReliableHeartbeatMessage, _super);
+        function NetReliableHeartbeatMessage() {
+            var _this = _super.call(this, undefined) || this;
+            _this.type = NetMessageType.ReliableHeartbeat;
+            return _this;
+        }
+        return NetReliableHeartbeatMessage;
+    }(NetReliableMessage));
+    exports.NetReliableHeartbeatMessage = NetReliableHeartbeatMessage;
+    var NetDisconnectMessage = /** @class */ (function (_super) {
+        __extends(NetDisconnectMessage, _super);
+        function NetDisconnectMessage() {
+            var _this = _super.call(this, undefined) || this;
+            _this.type = NetMessageType.Disconnect;
+            return _this;
+        }
+        return NetDisconnectMessage;
+    }(NetUnreliableMessage));
+    exports.NetDisconnectMessage = NetDisconnectMessage;
+    var NetIncomingMessage = /** @class */ (function (_super) {
+        __extends(NetIncomingMessage, _super);
+        function NetIncomingMessage(fromPeerID) {
+            var _this = _super.call(this) || this;
+            _this.fromPeerID = fromPeerID;
+            return _this;
+        }
+        return NetIncomingMessage;
+    }(NetMessage));
+    exports.NetIncomingMessage = NetIncomingMessage;
+    var NetStoredReliableMessage = /** @class */ (function () {
+        function NetStoredReliableMessage(msg, curTimestamp) {
             this.rtt = 0;
             this.resent = false;
             this.timesAcked = 0;
             this.msg = msg;
             this.sentTimestamp = curTimestamp;
         }
-        return StoredNetReliableMessage;
+        return NetStoredReliableMessage;
     }());
-    exports.StoredNetReliableMessage = StoredNetReliableMessage;
+    exports.NetStoredReliableMessage = NetStoredReliableMessage;
+});
+define("netlib/peer", ["require", "exports", "netlib/slidingBuffer"], function (require, exports, slidingBuffer_1) {
+    "use strict";
+    exports.__esModule = true;
     var NetPeer = /** @class */ (function () {
         function NetPeer() {
             // To allow other peers to detect duplicates
@@ -473,7 +608,7 @@ define("netlib/event", ["require", "exports"], function (require, exports) {
     }());
     exports.NetEventUtils = NetEventUtils;
 });
-define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], function (require, exports, peer_1, event_1) {
+define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event", "netlib/message"], function (require, exports, peer_1, event_1, message_1) {
     "use strict";
     exports.__esModule = true;
     var NetSimpleAddress = /** @class */ (function () {
@@ -489,56 +624,6 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
         return NetSimpleAddress;
     }());
     exports.NetSimpleAddress = NetSimpleAddress;
-    var NetMessageType;
-    (function (NetMessageType) {
-        NetMessageType[NetMessageType["Unreliable"] = 0] = "Unreliable";
-        NetMessageType[NetMessageType["Reliable"] = 1] = "Reliable";
-        NetMessageType[NetMessageType["ReliableOrdered"] = 2] = "ReliableOrdered";
-        NetMessageType[NetMessageType["ReliableHeartbeat"] = 3] = "ReliableHeartbeat";
-        NetMessageType[NetMessageType["Disconnect"] = 4] = "Disconnect";
-    })(NetMessageType = exports.NetMessageType || (exports.NetMessageType = {}));
-    var NetMessage = /** @class */ (function () {
-        function NetMessage(type, payload) {
-            this.type = type;
-            this.payload = payload;
-        }
-        return NetMessage;
-    }());
-    exports.NetMessage = NetMessage;
-    var NetReliableMessage = /** @class */ (function (_super) {
-        __extends(NetReliableMessage, _super);
-        function NetReliableMessage(original, relSeqID) {
-            var _this = _super.call(this, original.type, original.payload) || this;
-            _this.onAck = original.onAck;
-            _this.onResend = original.onResend;
-            _this.seqID = original.seqID;
-            _this.relSeqID = relSeqID;
-            return _this;
-        }
-        return NetReliableMessage;
-    }(NetMessage));
-    exports.NetReliableMessage = NetReliableMessage;
-    var NetReliableOrderedMessage = /** @class */ (function (_super) {
-        __extends(NetReliableOrderedMessage, _super);
-        function NetReliableOrderedMessage(original, relOrderSeqID) {
-            var _this = _super.call(this, original, original.relSeqID) || this;
-            _this.relOrderSeqID = relOrderSeqID;
-            return _this;
-        }
-        return NetReliableOrderedMessage;
-    }(NetReliableMessage));
-    exports.NetReliableOrderedMessage = NetReliableOrderedMessage;
-    var NetIncomingMessage = /** @class */ (function (_super) {
-        __extends(NetIncomingMessage, _super);
-        function NetIncomingMessage(original, fromPeerID) {
-            var _this = _super.call(this, original.type, original.payload) || this;
-            _this.seqID = original.seqID;
-            _this.fromPeerID = fromPeerID;
-            return _this;
-        }
-        return NetIncomingMessage;
-    }(NetMessage));
-    exports.NetIncomingMessage = NetIncomingMessage;
     var NetHost = /** @class */ (function () {
         function NetHost() {
             this.debug = false;
@@ -571,7 +656,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                 // disconnect message
                 peer.sendBuffer.splice(0);
                 // Timestamp is 0 because it doesn't matter for the Disconnect message type
-                this.enqueueSend(new NetMessage(NetMessageType.Disconnect, undefined), id, 0);
+                this.enqueueSend(new message_1.NetDisconnectMessage(), id, 0);
                 peer.waitingForDisconnect = true;
             }
         };
@@ -587,24 +672,27 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
             if (peer == undefined || peer.waitingForDisconnect) {
                 return;
             }
+            var msgType = msg.getType();
             msg.seqID = peer.msgSeqID++;
-            if (msg.type == NetMessageType.Unreliable || msg.type == NetMessageType.Disconnect) {
+            if (msgType == message_1.NetMessageType.Unreliable || msgType == message_1.NetMessageType.Disconnect) {
                 // No extra processing required
-                peer.sendBuffer.push(msg);
+                peer.sendBuffer.push(msg.getWireForm());
             }
             else {
                 // Create a reliable message
-                var reliableMsg = new NetReliableMessage(msg, peer.relSeqID++);
-                if (reliableMsg.type == NetMessageType.ReliableOrdered) {
-                    reliableMsg = new NetReliableOrderedMessage(reliableMsg, peer.relOrderSeqID++);
+                var reliableMsg = msg;
+                reliableMsg.relSeqID = peer.relSeqID++;
+                if (msgType == message_1.NetMessageType.ReliableOrdered) {
+                    var reliableOrderedMsg = msg;
+                    reliableOrderedMsg.relOrderSeqID = peer.relOrderSeqID++;
                 }
                 // Attach our acks
                 reliableMsg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
                 reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
                 // Store message
-                peer.relSentMsgs.set(reliableMsg.relSeqID, new peer_1.StoredNetReliableMessage(reliableMsg, curTimestamp));
+                peer.relSentMsgs.set(reliableMsg.relSeqID, new message_1.NetStoredReliableMessage(reliableMsg, curTimestamp));
                 // Enqueue
-                peer.sendBuffer.push(reliableMsg);
+                peer.sendBuffer.push(reliableMsg.getWireForm());
                 peer.relSent = true;
             }
         };
@@ -614,7 +702,10 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                 return;
             }
             peer.updateTimeout(curTimestamp);
-            var incomingMsg = new NetIncomingMessage(msg, peer.id);
+            // let incomingMsg = new NetIncomingMessage(msg, peer.id);
+            var incomingMsg = new message_1.NetIncomingMessage(peer.id);
+            incomingMsg.fromWireForm(msg);
+            var msgType = incomingMsg.getType();
             // Detect and discard duplicates
             if (peer.recvSeqIDs.isNew(incomingMsg.seqID)) {
                 peer.recvSeqIDs.set(incomingMsg.seqID, true); // Mark as received, and continue
@@ -638,23 +729,25 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
                     }
                 }
             }
-            if (incomingMsg.type == NetMessageType.Unreliable) {
+            if (msgType == message_1.NetMessageType.Unreliable) {
                 // No extra processing required
                 this.recvBuffer.push(incomingMsg);
             }
-            else if (incomingMsg.type == NetMessageType.Disconnect) {
+            else if (msgType == message_1.NetMessageType.Disconnect) {
                 this.eventHandler(this, peer, event_1.NetEvent.DisconnectRecv, incomingMsg);
                 this.finalDisconnectPeer(peer.id);
             }
             else {
-                var reliableMsg = msg;
-                if (reliableMsg.type == NetMessageType.Reliable) {
+                var reliableMsg = new message_1.NetReliableMessage(undefined);
+                reliableMsg.fromWireForm(msg);
+                if (msgType == message_1.NetMessageType.Reliable) {
                     // Let it be received right away
                     this.recvBuffer.push(incomingMsg);
                 }
-                else if (reliableMsg.type == NetMessageType.ReliableOrdered) {
+                else if (msgType == message_1.NetMessageType.ReliableOrdered) {
                     // Store in queue
-                    var reliableOrderedMsg = reliableMsg;
+                    var reliableOrderedMsg = new message_1.NetReliableOrderedMessage(undefined);
+                    reliableOrderedMsg.fromWireForm(msg);
                     if (peer.relRecvOrderMsgs.canSet(reliableOrderedMsg.relOrderSeqID)) {
                         peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                     }
@@ -797,7 +890,7 @@ define("netlib/host", ["require", "exports", "netlib/peer", "netlib/event"], fun
             }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
             if (!peer.relSent) {
-                this.enqueueSend(new NetMessage(NetMessageType.ReliableHeartbeat, undefined), peer.id, curTimestamp);
+                this.enqueueSend(new message_1.NetReliableHeartbeatMessage(), peer.id, curTimestamp);
             }
             peer.relSent = false;
             // Returns a copy of the buffer, and empties the original buffer
@@ -857,7 +950,7 @@ define("host", ["require", "exports", "lagNetwork", "netlib/host"], function (re
     }());
     exports.Host = Host;
 });
-define("server", ["require", "exports", "entity", "render", "host", "netlib/host", "netlib/event"], function (require, exports, entity_1, render_1, host_2, host_3, event_2) {
+define("server", ["require", "exports", "entity", "render", "host", "netlib/event", "netlib/message"], function (require, exports, entity_1, render_1, host_2, event_2, message_2) {
     "use strict";
     exports.__esModule = true;
     var Server = /** @class */ (function (_super) {
@@ -912,7 +1005,7 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
                 var peer = this_1.netHost.getPeerByAddress(client.netAddress);
                 if (peer != undefined) {
                     var curTimestamp_1 = +new Date();
-                    this_1.netHost.enqueueSend(new host_3.NetMessage(host_3.NetMessageType.Unreliable, worldState), peer.id, curTimestamp_1);
+                    this_1.netHost.enqueueSend(new message_2.NetUnreliableMessage(worldState), peer.id, curTimestamp_1);
                     this_1.netHost.getSendBuffer(peer.id, curTimestamp_1).forEach(function (message) {
                         client.network.send(curTimestamp_1, client.recvState, message, _this.netAddress.getID());
                     });
@@ -952,7 +1045,7 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/host
     }(host_2.Host));
     exports.Server = Server;
 });
-define("client", ["require", "exports", "entity", "lagNetwork", "render", "host", "netlib/host", "netlib/event"], function (require, exports, entity_2, lagNetwork_2, render_2, host_4, host_5, event_3) {
+define("client", ["require", "exports", "entity", "lagNetwork", "render", "host", "netlib/event", "netlib/message"], function (require, exports, entity_2, lagNetwork_2, render_2, host_3, event_3, message_3) {
     "use strict";
     exports.__esModule = true;
     var Client = /** @class */ (function (_super) {
@@ -1030,7 +1123,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Send the input to the server
             input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
             input.entityID = this.localEntityID;
-            this.netHost.enqueueSend(new host_5.NetMessage(host_5.NetMessageType.ReliableOrdered, input), this.serverPeerID, nowTS);
+            this.netHost.enqueueSend(new message_3.NetReliableOrderedMessage(input), this.serverPeerID, nowTS);
             // Do client-side prediction
             if (this.clientSidePrediction && this.localEntity != undefined) {
                 this.localEntity.applyInput(input);
@@ -1127,10 +1220,10 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             }
         };
         return Client;
-    }(host_4.Host));
+    }(host_3.Host));
     exports.Client = Client;
 });
-define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host", "netlib/host"], function (require, exports, host_6, lagNetwork_3, host_7, host_8) {
+define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host", "netlib/message"], function (require, exports, host_4, lagNetwork_3, host_5, message_4) {
     "use strict";
     exports.__esModule = true;
     var FrameRateLimiter = /** @class */ (function () {
@@ -1177,7 +1270,7 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host",
             _this.seqIDs = [];
             _this.fps = new FrameRateLimiter(fps);
             // Automatically assing a unique ID
-            _this.netAddress = new host_8.NetSimpleAddress(host_6.Host.curID++);
+            _this.netAddress = new host_5.NetSimpleAddress(host_4.Host.curID++);
             return _this;
         }
         TestServer.prototype.connect = function (client) {
@@ -1195,14 +1288,24 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host",
             if (this.keepSending) {
                 var seqID = this.seqID++;
                 this.seqIDs.push(seqID);
-                this.netHost.enqueueSend(new host_7.NetMessage(this.msgType, seqID), this.peerID, curTimestampMS);
+                var msg = void 0;
+                if (this.msgType == message_4.NetMessageType.Unreliable) {
+                    msg = new message_4.NetUnreliableMessage(seqID);
+                }
+                else if (this.msgType == message_4.NetMessageType.Reliable) {
+                    msg = new message_4.NetReliableMessage(seqID);
+                }
+                else {
+                    msg = new message_4.NetReliableOrderedMessage(seqID);
+                }
+                this.netHost.enqueueSend(msg, this.peerID, curTimestampMS);
             }
             this.netHost.getSendBuffer(this.peerID, curTimestampMS).forEach(function (message) {
                 _this.client.network.send(curTimestampMS, _this.client.recvState, message, _this.netAddress.getID());
             });
         };
         return TestServer;
-    }(host_6.Host));
+    }(host_4.Host));
     exports.TestServer = TestServer;
     var TestClient = /** @class */ (function (_super) {
         __extends(TestClient, _super);
@@ -1214,7 +1317,7 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host",
             _this.seqIDs = [];
             _this.fps = new FrameRateLimiter(fps);
             // Automatically assing a unique ID
-            _this.netAddress = new host_8.NetSimpleAddress(host_6.Host.curID++);
+            _this.netAddress = new host_5.NetSimpleAddress(host_4.Host.curID++);
             return _this;
         }
         TestClient.prototype.update = function () {
@@ -1242,7 +1345,7 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host",
             state.duplicateChance = duplicateChance;
         };
         return TestClient;
-    }(host_6.Host));
+    }(host_4.Host));
     exports.TestClient = TestClient;
     var TestLauncher = /** @class */ (function () {
         function TestLauncher() {
@@ -1255,16 +1358,16 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host",
             terribleConnection.set(100, 200, 0.5, 0.2, 0.1);
             var terribleConnectionDuplicates = new lagNetwork_3.NetworkState();
             terribleConnectionDuplicates.set(100, 200, 0.5, 0.2, 1.0);
-            TestLauncher.launchTest("Terrible connection reliable duplicates", host_7.NetMessageType.Reliable, false, 300, 60, 10, terribleConnectionDuplicates, terribleConnectionDuplicates);
-            TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", host_7.NetMessageType.Reliable, false, 300, 10, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
-            TestLauncher.launchTest("Average connection reliable", host_7.NetMessageType.Reliable, false, 300, 60, 10, averageConnection, averageConnection);
-            TestLauncher.launchTest("Average connection reliable ordered", host_7.NetMessageType.ReliableOrdered, false, 300, 60, 10, averageConnection, averageConnection);
-            TestLauncher.launchTest("Average connection reliable lowfreq", host_7.NetMessageType.Reliable, false, 300, 10, 60, averageConnection, averageConnection);
-            TestLauncher.launchTest("Average connection reliable ordered lowfreq", host_7.NetMessageType.ReliableOrdered, false, 300, 10, 60, averageConnection, averageConnection);
-            TestLauncher.launchTest("Terrible connection reliable", host_7.NetMessageType.Reliable, false, 300, 60, 10, terribleConnection, terribleConnection);
-            TestLauncher.launchTest("Terrible connection reliable ordered", host_7.NetMessageType.ReliableOrdered, false, 300, 60, 10, terribleConnection, terribleConnection);
-            TestLauncher.launchTest("Terrible connection reliable lowfreq", host_7.NetMessageType.Reliable, false, 300, 10, 60, terribleConnection, terribleConnection);
-            TestLauncher.launchTest("Terrible connection reliable ordered lowfreq", host_7.NetMessageType.ReliableOrdered, false, 300, 10, 60, terribleConnection, terribleConnection);
+            TestLauncher.launchTest("Terrible connection reliable duplicates", message_4.NetMessageType.Reliable, false, 300, 60, 10, terribleConnectionDuplicates, terribleConnectionDuplicates);
+            TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", message_4.NetMessageType.Reliable, false, 300, 10, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
+            TestLauncher.launchTest("Average connection reliable", message_4.NetMessageType.Reliable, false, 300, 60, 10, averageConnection, averageConnection);
+            TestLauncher.launchTest("Average connection reliable ordered", message_4.NetMessageType.ReliableOrdered, false, 300, 60, 10, averageConnection, averageConnection);
+            TestLauncher.launchTest("Average connection reliable lowfreq", message_4.NetMessageType.Reliable, false, 300, 10, 60, averageConnection, averageConnection);
+            TestLauncher.launchTest("Average connection reliable ordered lowfreq", message_4.NetMessageType.ReliableOrdered, false, 300, 10, 60, averageConnection, averageConnection);
+            TestLauncher.launchTest("Terrible connection reliable", message_4.NetMessageType.Reliable, false, 300, 60, 10, terribleConnection, terribleConnection);
+            TestLauncher.launchTest("Terrible connection reliable ordered", message_4.NetMessageType.ReliableOrdered, false, 300, 60, 10, terribleConnection, terribleConnection);
+            TestLauncher.launchTest("Terrible connection reliable lowfreq", message_4.NetMessageType.Reliable, false, 300, 10, 60, terribleConnection, terribleConnection);
+            TestLauncher.launchTest("Terrible connection reliable ordered lowfreq", message_4.NetMessageType.ReliableOrdered, false, 300, 10, 60, terribleConnection, terribleConnection);
             TestLauncher.failedTests.forEach(function (name) {
                 console.log("Failed test: [" + name + "]");
             });

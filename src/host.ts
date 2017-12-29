@@ -1,5 +1,6 @@
 import { LagNetwork } from "./lagNetwork";
-import { NetHost, NetIncomingMessage, NetAddress, NetSimpleAddress } from "./netlib/host";
+import { NetHost, NetAddress, NetSimpleAddress } from "./netlib/host";
+import { NetIncomingMessage } from "./netlib/message";
 
 export class Host {
 

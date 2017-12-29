@@ -3,9 +3,10 @@ import { LagNetwork, NetworkState } from "./lagNetwork";
 import { renderWorld } from "./render";
 import { Server } from "./server";
 import { Host } from "./host";
-import { NetMessage, NetMessageType, NetHost } from "./netlib/host";
+import { NetHost } from "./netlib/host";
 import { NetPeer } from "./netlib/peer";
 import { NetEvent, NetEventUtils } from "./netlib/event";
+import { NetReliableOrderedMessage, NetMessage } from "./netlib/message";
 
 export class Client extends Host {
 
@@ -104,7 +105,7 @@ export class Client extends Host {
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
 
-        this.netHost.enqueueSend(new NetMessage(NetMessageType.ReliableOrdered, input), this.serverPeerID, nowTS);
+        this.netHost.enqueueSend(new NetReliableOrderedMessage(input), this.serverPeerID, nowTS);
 
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {

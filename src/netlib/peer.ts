@@ -1,20 +1,6 @@
-import { NetMessage, NetReliableMessage, NetIncomingMessage } from "./host";
 import { SlidingArrayBuffer } from "./slidingBuffer";
 import { NetAddress } from "./host";
-
-export class StoredNetReliableMessage {
-
-    msg: NetReliableMessage;
-    sentTimestamp: number;
-    rtt: number = 0;
-    resent = false;
-    timesAcked: number = 0;
-
-    constructor(msg: NetReliableMessage, curTimestamp: number) {
-        this.msg = msg;
-        this.sentTimestamp = curTimestamp;
-    }
-}
+import { NetStoredReliableMessage, NetIncomingMessage } from "./message";
 
 export class NetPeer {
 
@@ -35,7 +21,7 @@ export class NetPeer {
     relSeqID: number = 0;
 
     // The reliable messages sent to this peer
-    relSentMsgs: SlidingArrayBuffer<StoredNetReliableMessage> = new SlidingArrayBuffer(1024, (idx: number): (StoredNetReliableMessage | undefined) => undefined);
+    relSentMsgs: SlidingArrayBuffer<NetStoredReliableMessage> = new SlidingArrayBuffer(1024, (idx: number): (NetStoredReliableMessage | undefined) => undefined);
 
     // The reliable messages received from this peer
     relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(256, (idx: number) => false);
@@ -48,7 +34,7 @@ export class NetPeer {
     // Flag indicates if this peer was sent a reliable message this frame
     relSent: boolean = false;
 
-    sendBuffer: Array<NetMessage> = [];
+    sendBuffer: Array<any> = [];
 
     // Disconnection and timeout
     waitingForDisconnect: boolean = false;
