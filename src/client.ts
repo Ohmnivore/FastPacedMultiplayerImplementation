@@ -208,6 +208,9 @@ export class Client extends Host {
         if (event == NetEvent.ConnectionEstablished) {
             this.serverPeerID = peer.id;
         }
+        else if (event == NetEvent.ReliableDeliveryFailedNoncritical) {
+            
+        }
         else {
             for (let entityID in this.entities) {
                 this.entities[entityID].connected = false;

@@ -60,10 +60,11 @@ class NetPeerInternal implements NetPeer {
     relSeqID: number = 0;
 
     // The reliable messages sent to this peer
-    relSentMsgs: SlidingArrayBuffer<NetStoredReliableMessage> = new SlidingArrayBuffer(1024, (idx: number): (NetStoredReliableMessage | undefined) => undefined);
+    relSentMsgs: SlidingArrayBuffer<NetStoredReliableMessage> = new SlidingArrayBuffer(2048, (idx: number): (NetStoredReliableMessage | undefined) => undefined);
 
     // The reliable messages received from this peer
-    relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(256, (idx: number) => false);
+    relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(128, (idx: number) => false);
+    relRecvMsgsOld: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(2048, (idx: number) => false);
 
     // Packets are re-ordered here
     relRecvOrderMsgs: SlidingArrayBuffer<NetIncomingMessage> = new SlidingArrayBuffer(2048, (idx: number): (NetIncomingMessage | undefined) => undefined);
@@ -285,7 +286,22 @@ export class NetHost {
             let reliableMsg = new NetReliableMessage(undefined);
             reliableMsg.fromWireForm(msg);
 
-            if (msgType == NetMessageType.Reliable) {
+            let reliableDuplicate = false;
+            if (reliableMsg.originalRelSeqID >= 0) {
+                if (peer.relRecvMsgsOld.canGet(reliableMsg.originalRelSeqID)) {
+                    if (peer.relRecvMsgsOld.get(reliableMsg.originalRelSeqID)) {
+                        reliableDuplicate = true;
+                    }
+                }
+                else {
+                    this.eventHandler(this, peer, NetEvent.DuplicatesBufferOverrun, reliableMsg);
+                }
+            }
+
+            if (reliableDuplicate) {
+                // Ignore duplicate
+            }
+            else if (msgType == NetMessageType.Reliable) {
                 // Let it be received right away
                 this.recvBuffer.push(incomingMsg);
             }
@@ -298,13 +314,13 @@ export class NetHost {
                     peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                 }
                 else {
-                    this.eventHandler(this, peer, NetEvent.ReliableRecvBufferOverflow, incomingMsg);
+                    this.eventHandler(this, peer, NetEvent.ReliableOrderedRecvBufferOverflow, reliableOrderedMsg);
                     return;
                 }
 
                 for (let seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
                     if (!peer.relRecvOrderMsgs.canGet(seq)) {
-                        break;
+                        this.eventHandler(this, peer, NetEvent.ReliableOrderedRecvBufferOverrun, reliableOrderedMsg);
                     }
 
                     let msg = peer.relRecvOrderMsgs.get(seq);
@@ -329,6 +345,13 @@ export class NetHost {
                 // Message is too old, just ignore
                 // throw "can't update acks";
             }
+            if (peer.relRecvMsgsOld.canSet(reliableMsg.relSeqID)) {
+                peer.relRecvMsgsOld.set(reliableMsg.relSeqID, true);
+            }
+            else {
+                // Message is too old, just ignore
+                // throw "can't update acks";
+            }
 
             // Process the peer's acks
             let start = reliableMsg.relRecvHeadID - reliableMsg.relRecvBuffer.length + 1;
@@ -343,10 +366,10 @@ export class NetHost {
 
                         if (stored == undefined) {
                             // Ignore
-                            this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                            this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, reliableMsg);
                             return;
                         }
-                        else if (stored.timesAcked == 0) {
+                        else if (!stored.acked) {
                             // Update peer RTT
                             let rtt = curTimestamp - stored.sentTimestamp;
                             stored.rtt = rtt;
@@ -357,35 +380,11 @@ export class NetHost {
                                 stored.msg.onAck(stored.msg, peer);
                             }
 
-                            stored.timesAcked++;
+                            stored.acked = true;
                         }
                     }
                     else if (relSeqID >= 0) {
-                        this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
-                        return;
-                    }
-                }
-                else {
-                    if (peer.relSentMsgs.canGet(relSeqID)) {
-                        let toResend = peer.relSentMsgs.get(relSeqID);
-
-                        if (toResend == undefined) {
-                            // Ignore
-                            this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
-                            return;
-                        }
-                        else if (toResend.timesAcked == 0) {
-                            // Resend callback
-                            if (toResend.msg.onResend != undefined) {
-                                toResend.msg.onResend(toResend, peer);
-                            }
-
-                            // Enqueue
-                            peer.sendBuffer.push(toResend.msg);
-                        }
-                    }
-                    else if (relSeqID >= 0) {
-                        this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                        this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, reliableMsg);
                         return;
                     }
                 }
@@ -409,10 +408,10 @@ export class NetHost {
                         }
 
                         n++;
-                        if (storedMsg.timesAcked == 0 && curTimestamp - storedMsg.sentTimestamp >= threshold) {
+                        if (!storedMsg.acked && curTimestamp - storedMsg.sentTimestamp >= threshold) {
                             dropped++;
                         }
-                        else if (storedMsg.timesAcked > 0 && storedMsg.rtt >= threshold) {
+                        else if (storedMsg.acked && storedMsg.rtt >= threshold) {
                             dropped++;
                         }
                     }
@@ -443,25 +442,57 @@ export class NetHost {
             return ret;
         }
 
-        // Extremely basic redundancy strategy - resend the reliable messages from the past 4 frames
-        let relHeadSeqID = peer.relSentMsgs.getHeadID();
-        for (let relSeqID = relHeadSeqID; relSeqID >= relHeadSeqID - 4; --relSeqID) {
-            let toResend = peer.relSentMsgs.get(relSeqID);
+        // Resend un-acked packets at the chosen rates
+        let start = peer.relSentMsgs.getHeadID() - peer.relSentMsgs.getMaxSize() + 1;
+        let end = peer.relSentMsgs.getHeadID();
+        for (let relSeqID = start; relSeqID <= end; ++relSeqID) {
+            let storedMsg = peer.relSentMsgs.get(relSeqID);
 
-            if (toResend != undefined) {
-                // Resend callback
-                if (toResend.msg.onResend != undefined) {
-                    toResend.msg.onResend(toResend, peer);
+            if (storedMsg != undefined && !storedMsg.acked) {
+                let delta = curTimestamp - storedMsg.lastSentTimestamp;
+                let originalDelta = curTimestamp - storedMsg.sentTimestamp;
+
+                if (originalDelta >= 1000 && !storedMsg.resent) {
+                    if (storedMsg.msg.critical) {
+                        // Re-send
+                        storedMsg.resent = true;
+                        storedMsg.msg.seqID = peer.msgSeqID++;
+                        storedMsg.msg.originalRelSeqID = storedMsg.msg.relSeqID;
+                        storedMsg.msg.relSeqID = peer.relSeqID++;
+
+                        // Attach our acks
+                        storedMsg.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
+                        storedMsg.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
+
+                        // Store message
+                        peer.relSentMsgs.set(storedMsg.msg.relSeqID, new NetStoredReliableMessage(storedMsg.msg, curTimestamp));
+
+                        // Enqueue
+                        peer.sendBuffer.push(storedMsg.msg.getWireForm());
+                        peer.relSent = true;
+                    }
+                    else {
+                        // Give up
+                        this.eventHandler(this, peer, NetEvent.ReliableDeliveryFailedNoncritical, storedMsg.msg);
+                    }
                 }
+                else if (delta >= storedMsg.resendInterval) {
+                    // Resend callback
+                    if (storedMsg.msg.onResend != undefined) {
+                        storedMsg.msg.onResend(storedMsg, peer);
+                    }
 
-                // Enqueue
-                peer.sendBuffer.push(toResend.msg);
+                    // Enqueue
+                    peer.sendBuffer.push(storedMsg.msg.getWireForm());
+                }
             }
         }
 
         // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
         if (!peer.relSent) {
-            this.enqueueSend(new NetReliableHeartbeatMessage(), peer.id, curTimestamp);
+            let heartbeatMsg = new NetReliableHeartbeatMessage();
+            heartbeatMsg.critical = false;
+            this.enqueueSend(heartbeatMsg, peer.id, curTimestamp);
         }
         peer.relSent = false;
 

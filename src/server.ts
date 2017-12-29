@@ -102,6 +102,9 @@ export class Server extends Host {
         if (event == NetEvent.ConnectionEstablished) {
             
         }
+        else if (event == NetEvent.ReliableDeliveryFailedNoncritical) {
+            
+        }
         else {
             this.peerIDToEntity[peer.id].connected = false;
         }

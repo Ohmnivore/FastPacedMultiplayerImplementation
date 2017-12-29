@@ -336,6 +336,8 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
         __extends(NetReliableMessage, _super);
         function NetReliableMessage(payload) {
             var _this = _super.call(this, payload) || this;
+            _this.critical = true;
+            _this.originalRelSeqID = -1;
             _this.type = NetMessageType.Reliable;
             return _this;
         }
@@ -345,6 +347,7 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
                 "payload": this.payload,
                 "seqID": this.seqID,
                 "relSeqID": this.relSeqID,
+                "originalRelSeqID": this.originalRelSeqID,
                 "relRecvHeadID": this.relRecvHeadID,
                 "relRecvBuffer": this.relRecvBuffer
             };
@@ -354,6 +357,7 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
             this.payload = src.payload;
             this.seqID = src.seqID;
             this.relSeqID = src.relSeqID;
+            this.originalRelSeqID = src.originalRelSeqID;
             this.relRecvHeadID = src.relRecvHeadID;
             this.relRecvBuffer = src.relRecvBuffer;
         };
@@ -373,6 +377,7 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
                 "payload": this.payload,
                 "seqID": this.seqID,
                 "relSeqID": this.relSeqID,
+                "originalRelSeqID": this.originalRelSeqID,
                 "relRecvHeadID": this.relRecvHeadID,
                 "relRecvBuffer": this.relRecvBuffer,
                 "relOrderSeqID": this.relOrderSeqID
@@ -383,6 +388,7 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
             this.payload = src.payload;
             this.seqID = src.seqID;
             this.relSeqID = src.relSeqID;
+            this.originalRelSeqID = src.originalRelSeqID;
             this.relRecvHeadID = src.relRecvHeadID;
             this.relRecvBuffer = src.relRecvBuffer;
             this.relOrderSeqID = src.relOrderSeqID;
@@ -402,11 +408,13 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
     exports.NetIncomingMessage = NetIncomingMessage;
     var NetStoredReliableMessage = /** @class */ (function () {
         function NetStoredReliableMessage(msg, curTimestamp) {
-            this.rtt = 0;
+            this.resendInterval = 100; // milliseconds
+            this.rtt = 0; // milliseconds
             this.resent = false;
-            this.timesAcked = 0;
+            this.acked = false;
             this.msg = msg;
             this.sentTimestamp = curTimestamp;
+            this.lastSentTimestamp = curTimestamp;
         }
         return NetStoredReliableMessage;
     }());
@@ -421,9 +429,12 @@ define("netlib/event", ["require", "exports"], function (require, exports) {
         NetEvent[NetEvent["DuplicatesBufferOverflow"] = 1] = "DuplicatesBufferOverflow";
         NetEvent[NetEvent["ReliableRecvBufferOverflow"] = 2] = "ReliableRecvBufferOverflow";
         NetEvent[NetEvent["ReliableSendBufferOverrun"] = 3] = "ReliableSendBufferOverrun";
-        NetEvent[NetEvent["DisconnectRecv"] = 4] = "DisconnectRecv";
-        NetEvent[NetEvent["Timeout"] = 5] = "Timeout";
-        NetEvent[NetEvent["ConnectionEstablished"] = 6] = "ConnectionEstablished";
+        NetEvent[NetEvent["ReliableOrderedRecvBufferOverflow"] = 4] = "ReliableOrderedRecvBufferOverflow";
+        NetEvent[NetEvent["ReliableOrderedRecvBufferOverrun"] = 5] = "ReliableOrderedRecvBufferOverrun";
+        NetEvent[NetEvent["ReliableDeliveryFailedNoncritical"] = 6] = "ReliableDeliveryFailedNoncritical";
+        NetEvent[NetEvent["DisconnectRecv"] = 7] = "DisconnectRecv";
+        NetEvent[NetEvent["Timeout"] = 8] = "Timeout";
+        NetEvent[NetEvent["ConnectionEstablished"] = 9] = "ConnectionEstablished";
     })(NetEvent = exports.NetEvent || (exports.NetEvent = {}));
     var NetEventUtils = /** @class */ (function () {
         function NetEventUtils() {
@@ -441,6 +452,15 @@ define("netlib/event", ["require", "exports"], function (require, exports) {
             else if (error == NetEvent.ReliableSendBufferOverrun) {
                 return "Reliable send buffer overrun";
             }
+            else if (error == NetEvent.ReliableOrderedRecvBufferOverflow) {
+                return "Reliable ordered receive buffer overflow";
+            }
+            else if (error == NetEvent.ReliableOrderedRecvBufferOverrun) {
+                return "Reliable ordered receive buffer overrun";
+            }
+            else if (error == NetEvent.ReliableDeliveryFailedNoncritical) {
+                return "Reliable message delivery failed noncritical";
+            }
             else if (error == NetEvent.DisconnectRecv) {
                 return "Disconnect request received";
             }
@@ -453,7 +473,7 @@ define("netlib/event", ["require", "exports"], function (require, exports) {
             }
         };
         NetEventUtils.defaultHandler = function (host, peer, event, msg) {
-            if (event != NetEvent.ConnectionEstablished) {
+            if (event != NetEvent.ConnectionEstablished && event != NetEvent.ReliableDeliveryFailedNoncritical) {
                 console.log("netlib event: [" + NetEventUtils.getEventString(event) + "] on address: [" + peer.address + "] ID: [" + peer.id + "]");
                 host.disconnectPeer(peer.id);
             }
@@ -555,9 +575,10 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
             // Sequence number for reliability algorithm
             this.relSeqID = 0;
             // The reliable messages sent to this peer
-            this.relSentMsgs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return undefined; });
+            this.relSentMsgs = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return undefined; });
             // The reliable messages received from this peer
-            this.relRecvMsgs = new slidingBuffer_1.SlidingArrayBuffer(256, function (idx) { return false; });
+            this.relRecvMsgs = new slidingBuffer_1.SlidingArrayBuffer(128, function (idx) { return false; });
+            this.relRecvMsgsOld = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return false; });
             // Packets are re-ordered here
             this.relRecvOrderMsgs = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return undefined; });
             this.relRecvOrderStartSeqID = 0;
@@ -741,7 +762,21 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
             else {
                 var reliableMsg = new message_1.NetReliableMessage(undefined);
                 reliableMsg.fromWireForm(msg);
-                if (msgType == message_1.NetMessageType.Reliable) {
+                var reliableDuplicate = false;
+                if (reliableMsg.originalRelSeqID >= 0) {
+                    if (peer.relRecvMsgsOld.canGet(reliableMsg.originalRelSeqID)) {
+                        if (peer.relRecvMsgsOld.get(reliableMsg.originalRelSeqID)) {
+                            reliableDuplicate = true;
+                        }
+                    }
+                    else {
+                        this.eventHandler(this, peer, event_1.NetEvent.DuplicatesBufferOverrun, reliableMsg);
+                    }
+                }
+                if (reliableDuplicate) {
+                    // Ignore duplicate
+                }
+                else if (msgType == message_1.NetMessageType.Reliable) {
                     // Let it be received right away
                     this.recvBuffer.push(incomingMsg);
                 }
@@ -753,12 +788,12 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                         peer.relRecvOrderMsgs.set(reliableOrderedMsg.relOrderSeqID, incomingMsg);
                     }
                     else {
-                        this.eventHandler(this, peer, event_1.NetEvent.ReliableRecvBufferOverflow, incomingMsg);
+                        this.eventHandler(this, peer, event_1.NetEvent.ReliableOrderedRecvBufferOverflow, reliableOrderedMsg);
                         return;
                     }
                     for (var seq = peer.relRecvOrderStartSeqID; seq <= peer.relRecvOrderMsgs.getHeadID(); ++seq) {
                         if (!peer.relRecvOrderMsgs.canGet(seq)) {
-                            break;
+                            this.eventHandler(this, peer, event_1.NetEvent.ReliableOrderedRecvBufferOverrun, reliableOrderedMsg);
                         }
                         var msg_1 = peer.relRecvOrderMsgs.get(seq);
                         if (msg_1 == undefined) {
@@ -779,6 +814,13 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                     // Message is too old, just ignore
                     // throw "can't update acks";
                 }
+                if (peer.relRecvMsgsOld.canSet(reliableMsg.relSeqID)) {
+                    peer.relRecvMsgsOld.set(reliableMsg.relSeqID, true);
+                }
+                else {
+                    // Message is too old, just ignore
+                    // throw "can't update acks";
+                }
                 // Process the peer's acks
                 var start = reliableMsg.relRecvHeadID - reliableMsg.relRecvBuffer.length + 1;
                 var end = reliableMsg.relRecvHeadID;
@@ -789,10 +831,10 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                             var stored = peer.relSentMsgs.get(relSeqID);
                             if (stored == undefined) {
                                 // Ignore
-                                this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                                this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, reliableMsg);
                                 return;
                             }
-                            else if (stored.timesAcked == 0) {
+                            else if (!stored.acked) {
                                 // Update peer RTT
                                 var rtt = curTimestamp - stored.sentTimestamp;
                                 stored.rtt = rtt;
@@ -801,33 +843,11 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                                 if (stored.msg.onAck != undefined) {
                                     stored.msg.onAck(stored.msg, peer);
                                 }
-                                stored.timesAcked++;
+                                stored.acked = true;
                             }
                         }
                         else if (relSeqID >= 0) {
-                            this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
-                            return;
-                        }
-                    }
-                    else {
-                        if (peer.relSentMsgs.canGet(relSeqID)) {
-                            var toResend = peer.relSentMsgs.get(relSeqID);
-                            if (toResend == undefined) {
-                                // Ignore
-                                this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
-                                return;
-                            }
-                            else if (toResend.timesAcked == 0) {
-                                // Resend callback
-                                if (toResend.msg.onResend != undefined) {
-                                    toResend.msg.onResend(toResend, peer);
-                                }
-                                // Enqueue
-                                peer.sendBuffer.push(toResend.msg);
-                            }
-                        }
-                        else if (relSeqID >= 0) {
-                            this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, incomingMsg);
+                            this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, reliableMsg);
                             return;
                         }
                     }
@@ -847,10 +867,10 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                                 break;
                             }
                             n++;
-                            if (storedMsg.timesAcked == 0 && curTimestamp - storedMsg.sentTimestamp >= threshold) {
+                            if (!storedMsg.acked && curTimestamp - storedMsg.sentTimestamp >= threshold) {
                                 dropped++;
                             }
-                            else if (storedMsg.timesAcked > 0 && storedMsg.rtt >= threshold) {
+                            else if (storedMsg.acked && storedMsg.rtt >= threshold) {
                                 dropped++;
                             }
                         }
@@ -876,22 +896,50 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                 this.finalDisconnectPeer(peer.id);
                 return ret;
             }
-            // Extremely basic redundancy strategy - resend the reliable messages from the past 4 frames
-            var relHeadSeqID = peer.relSentMsgs.getHeadID();
-            for (var relSeqID = relHeadSeqID; relSeqID >= relHeadSeqID - 4; --relSeqID) {
-                var toResend = peer.relSentMsgs.get(relSeqID);
-                if (toResend != undefined) {
-                    // Resend callback
-                    if (toResend.msg.onResend != undefined) {
-                        toResend.msg.onResend(toResend, peer);
+            // Resend un-acked packets at the chosen rates
+            var start = peer.relSentMsgs.getHeadID() - peer.relSentMsgs.getMaxSize() + 1;
+            var end = peer.relSentMsgs.getHeadID();
+            for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
+                var storedMsg = peer.relSentMsgs.get(relSeqID);
+                if (storedMsg != undefined && !storedMsg.acked) {
+                    var delta = curTimestamp - storedMsg.lastSentTimestamp;
+                    var originalDelta = curTimestamp - storedMsg.sentTimestamp;
+                    if (originalDelta >= 1000 && !storedMsg.resent) {
+                        if (storedMsg.msg.critical) {
+                            // Re-send
+                            storedMsg.resent = true;
+                            storedMsg.msg.seqID = peer.msgSeqID++;
+                            storedMsg.msg.originalRelSeqID = storedMsg.msg.relSeqID;
+                            storedMsg.msg.relSeqID = peer.relSeqID++;
+                            // Attach our acks
+                            storedMsg.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
+                            storedMsg.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer();
+                            // Store message
+                            peer.relSentMsgs.set(storedMsg.msg.relSeqID, new message_1.NetStoredReliableMessage(storedMsg.msg, curTimestamp));
+                            // Enqueue
+                            peer.sendBuffer.push(storedMsg.msg.getWireForm());
+                            peer.relSent = true;
+                        }
+                        else {
+                            // Give up
+                            this.eventHandler(this, peer, event_1.NetEvent.ReliableDeliveryFailedNoncritical, storedMsg.msg);
+                        }
                     }
-                    // Enqueue
-                    peer.sendBuffer.push(toResend.msg);
+                    else if (delta >= storedMsg.resendInterval) {
+                        // Resend callback
+                        if (storedMsg.msg.onResend != undefined) {
+                            storedMsg.msg.onResend(storedMsg, peer);
+                        }
+                        // Enqueue
+                        peer.sendBuffer.push(storedMsg.msg.getWireForm());
+                    }
                 }
             }
             // If this peer wasn't sent any reliable messages this frame, send one for acks and ping
             if (!peer.relSent) {
-                this.enqueueSend(new NetReliableHeartbeatMessage(), peer.id, curTimestamp);
+                var heartbeatMsg = new NetReliableHeartbeatMessage();
+                heartbeatMsg.critical = false;
+                this.enqueueSend(heartbeatMsg, peer.id, curTimestamp);
             }
             peer.relSent = false;
             // Returns a copy of the buffer, and empties the original buffer
@@ -1037,6 +1085,8 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/even
         Server.prototype.netEventHandler = function (host, peer, event, msg) {
             event_2.NetEventUtils.defaultHandler(host, peer, event, msg);
             if (event == event_2.NetEvent.ConnectionEstablished) {
+            }
+            else if (event == event_2.NetEvent.ReliableDeliveryFailedNoncritical) {
             }
             else {
                 this.peerIDToEntity[peer.id].connected = false;
@@ -1214,6 +1264,8 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             if (event == event_3.NetEvent.ConnectionEstablished) {
                 this.serverPeerID = peer.id;
             }
+            else if (event == event_3.NetEvent.ReliableDeliveryFailedNoncritical) {
+            }
             else {
                 for (var entityID in this.entities) {
                     this.entities[entityID].connected = false;
@@ -1356,19 +1408,19 @@ define("netlibTest", ["require", "exports", "host", "lagNetwork", "netlib/host",
             var averageConnection = new lagNetwork_3.NetworkState();
             averageConnection.set(100, 200, 0.02, 0.75, 0.02);
             var terribleConnection = new lagNetwork_3.NetworkState();
-            terribleConnection.set(100, 200, 0.5, 0.2, 0.1);
+            terribleConnection.set(100, 200, 0.33, 0.5, 0.0);
             var terribleConnectionDuplicates = new lagNetwork_3.NetworkState();
-            terribleConnectionDuplicates.set(100, 200, 0.5, 0.2, 1.0);
-            TestLauncher.launchTest("Terrible connection reliable duplicates", message_4.NetMessageType.Reliable, false, 300, 60, 10, terribleConnectionDuplicates, terribleConnectionDuplicates);
-            TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", message_4.NetMessageType.Reliable, false, 300, 10, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
-            TestLauncher.launchTest("Average connection reliable", message_4.NetMessageType.Reliable, false, 300, 60, 10, averageConnection, averageConnection);
-            TestLauncher.launchTest("Average connection reliable ordered", message_4.NetMessageType.ReliableOrdered, false, 300, 60, 10, averageConnection, averageConnection);
-            TestLauncher.launchTest("Average connection reliable lowfreq", message_4.NetMessageType.Reliable, false, 300, 10, 60, averageConnection, averageConnection);
-            TestLauncher.launchTest("Average connection reliable ordered lowfreq", message_4.NetMessageType.ReliableOrdered, false, 300, 10, 60, averageConnection, averageConnection);
-            TestLauncher.launchTest("Terrible connection reliable", message_4.NetMessageType.Reliable, false, 300, 60, 10, terribleConnection, terribleConnection);
-            TestLauncher.launchTest("Terrible connection reliable ordered", message_4.NetMessageType.ReliableOrdered, false, 300, 60, 10, terribleConnection, terribleConnection);
-            TestLauncher.launchTest("Terrible connection reliable lowfreq", message_4.NetMessageType.Reliable, false, 300, 10, 60, terribleConnection, terribleConnection);
-            TestLauncher.launchTest("Terrible connection reliable ordered lowfreq", message_4.NetMessageType.ReliableOrdered, false, 300, 10, 60, terribleConnection, terribleConnection);
+            terribleConnectionDuplicates.set(100, 200, 0.33, 0.5, 1.0);
+            TestLauncher.launchTest("Terrible connection reliable duplicates", message_4.NetMessageType.Reliable, false, 300, 60, 20, terribleConnectionDuplicates, terribleConnectionDuplicates);
+            TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", message_4.NetMessageType.Reliable, false, 300, 20, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
+            TestLauncher.launchTest("Average connection reliable", message_4.NetMessageType.Reliable, false, 300, 60, 20, averageConnection, averageConnection);
+            TestLauncher.launchTest("Average connection reliable ordered", message_4.NetMessageType.ReliableOrdered, false, 300, 60, 20, averageConnection, averageConnection);
+            TestLauncher.launchTest("Average connection reliable lowfreq", message_4.NetMessageType.Reliable, false, 300, 20, 60, averageConnection, averageConnection);
+            TestLauncher.launchTest("Average connection reliable ordered lowfreq", message_4.NetMessageType.ReliableOrdered, false, 300, 20, 60, averageConnection, averageConnection);
+            TestLauncher.launchTest("Terrible connection reliable", message_4.NetMessageType.Reliable, false, 300, 60, 20, terribleConnection, terribleConnection);
+            TestLauncher.launchTest("Terrible connection reliable ordered", message_4.NetMessageType.ReliableOrdered, false, 300, 60, 20, terribleConnection, terribleConnection);
+            TestLauncher.launchTest("Terrible connection reliable lowfreq", message_4.NetMessageType.Reliable, false, 300, 20, 60, terribleConnection, terribleConnection);
+            TestLauncher.launchTest("Terrible connection reliable ordered lowfreq", message_4.NetMessageType.ReliableOrdered, false, 300, 20, 60, terribleConnection, terribleConnection);
             TestLauncher.failedTests.forEach(function (name) {
                 console.log("Failed test: [" + name + "]");
             });

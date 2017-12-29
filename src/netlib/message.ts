@@ -52,7 +52,9 @@ export class NetUnreliableMessage extends NetMessage {
 
 export class NetReliableMessage extends NetUnreliableMessage {
 
+    critical: boolean = true;
     relSeqID: number;
+    originalRelSeqID: number = -1;
     relRecvHeadID: number;
     relRecvBuffer: Array<boolean>;
 
@@ -70,6 +72,7 @@ export class NetReliableMessage extends NetUnreliableMessage {
             "payload": this.payload,
             "seqID": this.seqID,
             "relSeqID": this.relSeqID,
+            "originalRelSeqID": this.originalRelSeqID,
             "relRecvHeadID": this.relRecvHeadID,
             "relRecvBuffer": this.relRecvBuffer
         };
@@ -80,6 +83,7 @@ export class NetReliableMessage extends NetUnreliableMessage {
         this.payload = src.payload;
         this.seqID = src.seqID;
         this.relSeqID = src.relSeqID;
+        this.originalRelSeqID = src.originalRelSeqID;
         this.relRecvHeadID = src.relRecvHeadID;
         this.relRecvBuffer = src.relRecvBuffer;
     }
@@ -100,6 +104,7 @@ export class NetReliableOrderedMessage extends NetReliableMessage {
             "payload": this.payload,
             "seqID": this.seqID,
             "relSeqID": this.relSeqID,
+            "originalRelSeqID": this.originalRelSeqID,
             "relRecvHeadID": this.relRecvHeadID,
             "relRecvBuffer": this.relRecvBuffer,
             "relOrderSeqID": this.relOrderSeqID
@@ -111,6 +116,7 @@ export class NetReliableOrderedMessage extends NetReliableMessage {
         this.payload = src.payload;
         this.seqID = src.seqID;
         this.relSeqID = src.relSeqID;
+        this.originalRelSeqID = src.originalRelSeqID;
         this.relRecvHeadID = src.relRecvHeadID;
         this.relRecvBuffer = src.relRecvBuffer;
         this.relOrderSeqID = src.relOrderSeqID;
@@ -130,13 +136,16 @@ export class NetIncomingMessage extends NetMessage {
 export class NetStoredReliableMessage {
 
     msg: NetReliableMessage;
-    sentTimestamp: number;
-    rtt: number = 0;
+    sentTimestamp: number;          // milliseconds
+    lastSentTimestamp: number;      // milliseconds
+    resendInterval: number = 100;   // milliseconds
+    rtt: number = 0;                // milliseconds
     resent = false;
-    timesAcked: number = 0;
+    acked: boolean = false;
 
     constructor(msg: NetReliableMessage, curTimestamp: number) {
         this.msg = msg;
         this.sentTimestamp = curTimestamp;
+        this.lastSentTimestamp = curTimestamp;
     }
 }

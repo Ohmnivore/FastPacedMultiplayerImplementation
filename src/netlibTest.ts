@@ -170,25 +170,25 @@ export class TestLauncher {
         averageConnection.set(100, 200, 0.02, 0.75, 0.02);
 
         let terribleConnection = new NetworkState();
-        terribleConnection.set(100, 200, 0.5, 0.2, 0.1);
+        terribleConnection.set(100, 200, 0.33, 0.5, 0.0);
 
         let terribleConnectionDuplicates = new NetworkState();
-        terribleConnectionDuplicates.set(100, 200, 0.5, 0.2, 1.0);
+        terribleConnectionDuplicates.set(100, 200, 0.33, 0.5, 1.0);
 
-        TestLauncher.launchTest("Terrible connection reliable duplicates", NetMessageType.Reliable, false, 300, 60, 10, terribleConnectionDuplicates, terribleConnectionDuplicates);
-        TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", NetMessageType.Reliable, false, 300, 10, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
+        TestLauncher.launchTest("Terrible connection reliable duplicates", NetMessageType.Reliable, false, 300, 60, 20, terribleConnectionDuplicates, terribleConnectionDuplicates);
+        TestLauncher.launchTest("Terrible connection reliable duplicates lowfreq", NetMessageType.Reliable, false, 300, 20, 60, terribleConnectionDuplicates, terribleConnectionDuplicates);
 
-        TestLauncher.launchTest("Average connection reliable", NetMessageType.Reliable, false, 300, 60, 10, averageConnection, averageConnection);
-        TestLauncher.launchTest("Average connection reliable ordered", NetMessageType.ReliableOrdered, false, 300, 60, 10, averageConnection, averageConnection);
+        TestLauncher.launchTest("Average connection reliable", NetMessageType.Reliable, false, 300, 60, 20, averageConnection, averageConnection);
+        TestLauncher.launchTest("Average connection reliable ordered", NetMessageType.ReliableOrdered, false, 300, 60, 20, averageConnection, averageConnection);
 
-        TestLauncher.launchTest("Average connection reliable lowfreq", NetMessageType.Reliable, false, 300, 10, 60, averageConnection, averageConnection);
-        TestLauncher.launchTest("Average connection reliable ordered lowfreq", NetMessageType.ReliableOrdered, false, 300, 10, 60, averageConnection, averageConnection);
+        TestLauncher.launchTest("Average connection reliable lowfreq", NetMessageType.Reliable, false, 300, 20, 60, averageConnection, averageConnection);
+        TestLauncher.launchTest("Average connection reliable ordered lowfreq", NetMessageType.ReliableOrdered, false, 300, 20, 60, averageConnection, averageConnection);
 
-        TestLauncher.launchTest("Terrible connection reliable", NetMessageType.Reliable, false, 300, 60, 10, terribleConnection, terribleConnection);
-        TestLauncher.launchTest("Terrible connection reliable ordered", NetMessageType.ReliableOrdered, false, 300, 60, 10, terribleConnection, terribleConnection);
+        TestLauncher.launchTest("Terrible connection reliable", NetMessageType.Reliable, false, 300, 60, 20, terribleConnection, terribleConnection);
+        TestLauncher.launchTest("Terrible connection reliable ordered", NetMessageType.ReliableOrdered, false, 300, 60, 20, terribleConnection, terribleConnection);
 
-        TestLauncher.launchTest("Terrible connection reliable lowfreq", NetMessageType.Reliable, false, 300, 10, 60, terribleConnection, terribleConnection);
-        TestLauncher.launchTest("Terrible connection reliable ordered lowfreq", NetMessageType.ReliableOrdered, false, 300, 10, 60, terribleConnection, terribleConnection);
+        TestLauncher.launchTest("Terrible connection reliable lowfreq", NetMessageType.Reliable, false, 300, 20, 60, terribleConnection, terribleConnection);
+        TestLauncher.launchTest("Terrible connection reliable ordered lowfreq", NetMessageType.ReliableOrdered, false, 300, 20, 60, terribleConnection, terribleConnection);
         
         TestLauncher.failedTests.forEach(name => {
             console.log("Failed test: [" + name + "]");
