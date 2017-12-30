@@ -413,7 +413,8 @@ define("netlib/message", ["require", "exports"], function (require, exports) {
         function NetStoredReliableMessage(msg, curTimestamp) {
             this.resendInterval = 100; // milliseconds
             this.rtt = 0; // milliseconds
-            this.resent = false;
+            this.timesSent = 1;
+            this.obsolete = false;
             this.acked = false;
             this.msg = msg;
             this.sentTimestamp = curTimestamp;
@@ -579,6 +580,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
             this.relSeqID = 0;
             // The reliable messages sent to this peer
             this.relSentMsgs = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return undefined; });
+            this.relRecvAckTailID = -1;
             // The reliable messages received from this peer
             this.relRecvMsgs = new slidingBuffer_1.SlidingArrayBuffer(128, function (idx) { return false; });
             this.relRecvMsgsOld = new slidingBuffer_1.SlidingArrayBuffer(4096, function (idx) { return false; });
@@ -827,6 +829,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                 // Process the peer's acks
                 var start = reliableMsg.relRecvHeadID - reliableMsg.relRecvBuffer.length + 1;
                 var end = reliableMsg.relRecvHeadID;
+                peer.relRecvAckTailID = Math.max(peer.relRecvAckTailID, start);
                 for (var relSeqID_1 = start; relSeqID_1 <= end; ++relSeqID_1) {
                     var idx = relSeqID_1 % reliableMsg.relRecvBuffer.length;
                     if (reliableMsg.relRecvBuffer[idx] == true) {
@@ -904,13 +907,12 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
             var end = peer.relSentMsgs.getHeadID();
             for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
                 var storedMsg = peer.relSentMsgs.get(relSeqID);
-                if (storedMsg != undefined && !storedMsg.acked && !storedMsg.resent) {
+                if (storedMsg != undefined && !storedMsg.acked && !storedMsg.obsolete) {
                     var delta = curTimestamp - storedMsg.lastSentTimestamp;
-                    var originalDelta = curTimestamp - storedMsg.sentTimestamp;
-                    if (originalDelta >= peer.rtt * 1.5) {
+                    if (storedMsg.msg.relSeqID < peer.relRecvAckTailID) {
                         if (storedMsg.msg.critical) {
                             // Re-send
-                            storedMsg.resent = true;
+                            storedMsg.obsolete = true;
                             storedMsg.msg.seqID = peer.msgSeqID++;
                             storedMsg.msg.relSeqID = peer.relSeqID++;
                             // Attach our acks
@@ -924,10 +926,11 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                         }
                         else {
                             // Give up
+                            storedMsg.obsolete = true;
                             this.eventHandler(this, peer, event_1.NetEvent.ReliableDeliveryFailedNoncritical, storedMsg.msg);
                         }
                     }
-                    else if (delta >= storedMsg.resendInterval) {
+                    else if (delta >= storedMsg.resendInterval && storedMsg.timesSent <= 4) {
                         storedMsg.lastSentTimestamp = curTimestamp;
                         // Resend callback
                         if (storedMsg.msg.onResend != undefined) {
@@ -935,6 +938,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                         }
                         // Enqueue
                         peer.sendBuffer.push(storedMsg.msg.getWireForm());
+                        storedMsg.timesSent++;
                     }
                 }
             }

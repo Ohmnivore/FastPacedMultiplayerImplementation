@@ -140,7 +140,8 @@ export class NetStoredReliableMessage {
     lastSentTimestamp: number;      // milliseconds
     resendInterval: number = 100;   // milliseconds
     rtt: number = 0;                // milliseconds
-    resent = false;
+    timesSent: number = 1;
+    obsolete: boolean = false;
     acked: boolean = false;
 
     constructor(msg: NetReliableMessage, curTimestamp: number) {

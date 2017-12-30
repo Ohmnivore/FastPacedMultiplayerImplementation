@@ -61,6 +61,7 @@ class NetPeerInternal implements NetPeer {
 
     // The reliable messages sent to this peer
     relSentMsgs: SlidingArrayBuffer<NetStoredReliableMessage> = new SlidingArrayBuffer(2048, (idx: number): (NetStoredReliableMessage | undefined) => undefined);
+    relRecvAckTailID: number = -1;
 
     // The reliable messages received from this peer
     relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(128, (idx: number) => false);
@@ -357,6 +358,7 @@ export class NetHost {
             // Process the peer's acks
             let start = reliableMsg.relRecvHeadID - reliableMsg.relRecvBuffer.length + 1;
             let end = reliableMsg.relRecvHeadID;
+            peer.relRecvAckTailID = Math.max(peer.relRecvAckTailID, start);
 
             for (let relSeqID = start; relSeqID <= end; ++relSeqID) {
                 let idx = relSeqID % reliableMsg.relRecvBuffer.length;
@@ -449,14 +451,13 @@ export class NetHost {
         for (let relSeqID = start; relSeqID <= end; ++relSeqID) {
             let storedMsg = peer.relSentMsgs.get(relSeqID);
 
-            if (storedMsg != undefined && !storedMsg.acked && !storedMsg.resent) {
+            if (storedMsg != undefined && !storedMsg.acked && !storedMsg.obsolete) {
                 let delta = curTimestamp - storedMsg.lastSentTimestamp;
-                let originalDelta = curTimestamp - storedMsg.sentTimestamp;
 
-                if (originalDelta >= peer.rtt * 1.5) {
+                if (storedMsg.msg.relSeqID < peer.relRecvAckTailID) {
                     if (storedMsg.msg.critical) {
                         // Re-send
-                        storedMsg.resent = true;
+                        storedMsg.obsolete = true;
                         storedMsg.msg.seqID = peer.msgSeqID++;
                         storedMsg.msg.relSeqID = peer.relSeqID++;
 
@@ -473,10 +474,11 @@ export class NetHost {
                     }
                     else {
                         // Give up
+                        storedMsg.obsolete = true;
                         this.eventHandler(this, peer, NetEvent.ReliableDeliveryFailedNoncritical, storedMsg.msg);
                     }
                 }
-                else if (delta >= storedMsg.resendInterval) {
+                else if (delta >= storedMsg.resendInterval && storedMsg.timesSent <= 4) {
                     storedMsg.lastSentTimestamp = curTimestamp;
 
                     // Resend callback
@@ -486,6 +488,7 @@ export class NetHost {
 
                     // Enqueue
                     peer.sendBuffer.push(storedMsg.msg.getWireForm());
+                    storedMsg.timesSent++;
                 }
             }
         }
