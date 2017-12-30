@@ -91,7 +91,8 @@ export class LagNetwork {
     }
 
     receive(timestamp: number): Message | undefined {
-        if (this.debug) console.log(this.messages.length);
+        if (this.debug) console.log(this.messages.length); // Rudimentary estimation of bandwidth
+
         for (let i = 0; i < this.messages.length; i++) {
             let message = this.messages[i];
             

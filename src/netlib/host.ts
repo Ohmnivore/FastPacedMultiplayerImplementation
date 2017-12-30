@@ -219,6 +219,7 @@ export class NetHost {
             // Create a reliable message
             let reliableMsg = msg as NetReliableMessage;
             reliableMsg.relSeqID = peer.relSeqID++;
+            reliableMsg.originalRelSeqID = reliableMsg.relSeqID;
 
             if (msgType == NetMessageType.ReliableOrdered) {
                 let reliableOrderedMsg = msg as NetReliableOrderedMessage;
@@ -287,12 +288,10 @@ export class NetHost {
             reliableMsg.fromWireForm(msg);
 
             let reliableDuplicate = false;
-            let relSeqID = reliableMsg.originalRelSeqID >= 0 ? reliableMsg.originalRelSeqID : reliableMsg.seqID;
+            let relSeqID = reliableMsg.originalRelSeqID;
 
-            if (peer.relRecvMsgsOld.isNew(relSeqID)) {
-                peer.relRecvMsgsOld.set(relSeqID, true); // Mark as received, and continue
-            }
-            else {
+            // Detect and discard duplicates
+            if (!peer.relRecvMsgsOld.isNew(relSeqID)) {
                 if (peer.relRecvMsgsOld.canGet(relSeqID)) {
                     if (peer.relRecvMsgsOld.get(relSeqID) == true) {
                         reliableDuplicate = true; // This is a duplicate message
@@ -302,6 +301,9 @@ export class NetHost {
                     this.eventHandler(this, peer, NetEvent.DuplicatesBufferOverrun, reliableMsg);
                     return;
                 }
+            }
+            if (peer.relRecvMsgsOld.canSet(relSeqID)) {
+                peer.relRecvMsgsOld.set(relSeqID, true); // Mark as received
             }
 
             if (reliableDuplicate) {
@@ -447,7 +449,7 @@ export class NetHost {
         for (let relSeqID = start; relSeqID <= end; ++relSeqID) {
             let storedMsg = peer.relSentMsgs.get(relSeqID);
 
-            if (storedMsg != undefined && !storedMsg.acked) {
+            if (storedMsg != undefined && !storedMsg.acked && !storedMsg.resent) {
                 let delta = curTimestamp - storedMsg.lastSentTimestamp;
                 let originalDelta = curTimestamp - storedMsg.sentTimestamp;
 
@@ -456,7 +458,6 @@ export class NetHost {
                         // Re-send
                         storedMsg.resent = true;
                         storedMsg.msg.seqID = peer.msgSeqID++;
-                        storedMsg.msg.originalRelSeqID = storedMsg.msg.relSeqID;
                         storedMsg.msg.relSeqID = peer.relSeqID++;
 
                         // Attach our acks

@@ -243,7 +243,7 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
         };
         LagNetwork.prototype.receive = function (timestamp) {
             if (this.debug)
-                console.log(this.messages.length);
+                console.log(this.messages.length); // Rudimentary estimation of bandwidth
             for (var i = 0; i < this.messages.length; i++) {
                 var message = this.messages[i];
                 if (message.recvTS <= timestamp) {
@@ -707,6 +707,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                 // Create a reliable message
                 var reliableMsg = msg;
                 reliableMsg.relSeqID = peer.relSeqID++;
+                reliableMsg.originalRelSeqID = reliableMsg.relSeqID;
                 if (msgType == message_1.NetMessageType.ReliableOrdered) {
                     var reliableOrderedMsg = msg;
                     reliableOrderedMsg.relOrderSeqID = peer.relOrderSeqID++;
@@ -766,11 +767,9 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                 var reliableMsg = new message_1.NetReliableMessage(undefined);
                 reliableMsg.fromWireForm(msg);
                 var reliableDuplicate = false;
-                var relSeqID = reliableMsg.originalRelSeqID >= 0 ? reliableMsg.originalRelSeqID : reliableMsg.seqID;
-                if (peer.relRecvMsgsOld.isNew(relSeqID)) {
-                    peer.relRecvMsgsOld.set(relSeqID, true); // Mark as received, and continue
-                }
-                else {
+                var relSeqID = reliableMsg.originalRelSeqID;
+                // Detect and discard duplicates
+                if (!peer.relRecvMsgsOld.isNew(relSeqID)) {
                     if (peer.relRecvMsgsOld.canGet(relSeqID)) {
                         if (peer.relRecvMsgsOld.get(relSeqID) == true) {
                             reliableDuplicate = true; // This is a duplicate message
@@ -780,6 +779,9 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                         this.eventHandler(this, peer, event_1.NetEvent.DuplicatesBufferOverrun, reliableMsg);
                         return;
                     }
+                }
+                if (peer.relRecvMsgsOld.canSet(relSeqID)) {
+                    peer.relRecvMsgsOld.set(relSeqID, true); // Mark as received
                 }
                 if (reliableDuplicate) {
                     // Ignore duplicate
@@ -902,7 +904,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
             var end = peer.relSentMsgs.getHeadID();
             for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
                 var storedMsg = peer.relSentMsgs.get(relSeqID);
-                if (storedMsg != undefined && !storedMsg.acked) {
+                if (storedMsg != undefined && !storedMsg.acked && !storedMsg.resent) {
                     var delta = curTimestamp - storedMsg.lastSentTimestamp;
                     var originalDelta = curTimestamp - storedMsg.sentTimestamp;
                     if (originalDelta >= peer.rtt * 1.5) {
@@ -910,7 +912,6 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                             // Re-send
                             storedMsg.resent = true;
                             storedMsg.msg.seqID = peer.msgSeqID++;
-                            storedMsg.msg.originalRelSeqID = storedMsg.msg.relSeqID;
                             storedMsg.msg.relSeqID = peer.relSeqID++;
                             // Attach our acks
                             storedMsg.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
