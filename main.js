@@ -194,6 +194,7 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
             this.duplicateChance = src.duplicateChance;
         };
         NetworkState.prototype.randomLag = function () {
+            this.lagMax = Math.max(this.lagMax, this.lagMin);
             return Math.floor(Math.random() * (this.lagMax - this.lagMin)) + this.lagMin;
         };
         NetworkState.prototype.shouldDrop = function () {
