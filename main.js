@@ -227,6 +227,7 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
     exports.NetworkState = NetworkState;
     var LagNetwork = /** @class */ (function () {
         function LagNetwork() {
+            this.debug = false;
             this.messages = [];
         }
         LagNetwork.prototype.send = function (timestamp, state, payload, fromNetworkID) {
@@ -241,6 +242,8 @@ define("lagNetwork", ["require", "exports"], function (require, exports) {
             this.messages.push(message);
         };
         LagNetwork.prototype.receive = function (timestamp) {
+            if (this.debug)
+                console.log(this.messages.length);
             for (var i = 0; i < this.messages.length; i++) {
                 var message = this.messages[i];
                 if (message.recvTS <= timestamp) {
@@ -571,14 +574,14 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
             // To allow other peers to detect duplicates
             this.msgSeqID = 0;
             // The received seqIDs from this peer, to detect duplicates
-            this.recvSeqIDs = new slidingBuffer_1.SlidingArrayBuffer(1024, function (idx) { return false; });
+            this.recvSeqIDs = new slidingBuffer_1.SlidingArrayBuffer(4096, function (idx) { return false; });
             // Sequence number for reliability algorithm
             this.relSeqID = 0;
             // The reliable messages sent to this peer
             this.relSentMsgs = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return undefined; });
             // The reliable messages received from this peer
             this.relRecvMsgs = new slidingBuffer_1.SlidingArrayBuffer(128, function (idx) { return false; });
-            this.relRecvMsgsOld = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return false; });
+            this.relRecvMsgsOld = new slidingBuffer_1.SlidingArrayBuffer(4096, function (idx) { return false; });
             // Packets are re-ordered here
             this.relRecvOrderMsgs = new slidingBuffer_1.SlidingArrayBuffer(2048, function (idx) { return undefined; });
             this.relRecvOrderStartSeqID = 0;
@@ -763,14 +766,19 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                 var reliableMsg = new message_1.NetReliableMessage(undefined);
                 reliableMsg.fromWireForm(msg);
                 var reliableDuplicate = false;
-                if (reliableMsg.originalRelSeqID >= 0) {
-                    if (peer.relRecvMsgsOld.canGet(reliableMsg.originalRelSeqID)) {
-                        if (peer.relRecvMsgsOld.get(reliableMsg.originalRelSeqID)) {
-                            reliableDuplicate = true;
+                var relSeqID = reliableMsg.originalRelSeqID >= 0 ? reliableMsg.originalRelSeqID : reliableMsg.seqID;
+                if (peer.relRecvMsgsOld.isNew(relSeqID)) {
+                    peer.relRecvMsgsOld.set(relSeqID, true); // Mark as received, and continue
+                }
+                else {
+                    if (peer.relRecvMsgsOld.canGet(relSeqID)) {
+                        if (peer.relRecvMsgsOld.get(relSeqID) == true) {
+                            reliableDuplicate = true; // This is a duplicate message
                         }
                     }
                     else {
                         this.eventHandler(this, peer, event_1.NetEvent.DuplicatesBufferOverrun, reliableMsg);
+                        return;
                     }
                 }
                 if (reliableDuplicate) {
@@ -814,21 +822,14 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                     // Message is too old, just ignore
                     // throw "can't update acks";
                 }
-                if (peer.relRecvMsgsOld.canSet(reliableMsg.relSeqID)) {
-                    peer.relRecvMsgsOld.set(reliableMsg.relSeqID, true);
-                }
-                else {
-                    // Message is too old, just ignore
-                    // throw "can't update acks";
-                }
                 // Process the peer's acks
                 var start = reliableMsg.relRecvHeadID - reliableMsg.relRecvBuffer.length + 1;
                 var end = reliableMsg.relRecvHeadID;
-                for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
-                    var idx = relSeqID % reliableMsg.relRecvBuffer.length;
+                for (var relSeqID_1 = start; relSeqID_1 <= end; ++relSeqID_1) {
+                    var idx = relSeqID_1 % reliableMsg.relRecvBuffer.length;
                     if (reliableMsg.relRecvBuffer[idx] == true) {
-                        if (peer.relSentMsgs.canGet(relSeqID)) {
-                            var stored = peer.relSentMsgs.get(relSeqID);
+                        if (peer.relSentMsgs.canGet(relSeqID_1)) {
+                            var stored = peer.relSentMsgs.get(relSeqID_1);
                             if (stored == undefined) {
                                 // Ignore
                                 this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, reliableMsg);
@@ -846,7 +847,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                                 stored.acked = true;
                             }
                         }
-                        else if (relSeqID >= 0) {
+                        else if (relSeqID_1 >= 0) {
                             this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, reliableMsg);
                             return;
                         }
@@ -904,7 +905,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                 if (storedMsg != undefined && !storedMsg.acked) {
                     var delta = curTimestamp - storedMsg.lastSentTimestamp;
                     var originalDelta = curTimestamp - storedMsg.sentTimestamp;
-                    if (originalDelta >= 1000 && !storedMsg.resent) {
+                    if (originalDelta >= peer.rtt * 1.5) {
                         if (storedMsg.msg.critical) {
                             // Re-send
                             storedMsg.resent = true;
@@ -926,6 +927,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                         }
                     }
                     else if (delta >= storedMsg.resendInterval) {
+                        storedMsg.lastSentTimestamp = curTimestamp;
                         // Resend callback
                         if (storedMsg.msg.onResend != undefined) {
                             storedMsg.msg.onResend(storedMsg, peer);

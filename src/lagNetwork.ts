@@ -72,6 +72,8 @@ export class NetworkState {
 
 export class LagNetwork {
 
+    debug: boolean = false;
+
     protected messages: Array<TimedMessage> = [];
 
     send(timestamp: number, state: NetworkState, payload: any, fromNetworkID: number) {
@@ -89,6 +91,7 @@ export class LagNetwork {
     }
 
     receive(timestamp: number): Message | undefined {
+        if (this.debug) console.log(this.messages.length);
         for (let i = 0; i < this.messages.length; i++) {
             let message = this.messages[i];
             

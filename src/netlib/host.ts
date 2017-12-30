@@ -54,7 +54,7 @@ class NetPeerInternal implements NetPeer {
     msgSeqID: number = 0;
 
     // The received seqIDs from this peer, to detect duplicates
-    recvSeqIDs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(1024, (idx: number) => false);
+    recvSeqIDs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(4096, (idx: number) => false);
 
     // Sequence number for reliability algorithm
     relSeqID: number = 0;
@@ -64,7 +64,7 @@ class NetPeerInternal implements NetPeer {
 
     // The reliable messages received from this peer
     relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(128, (idx: number) => false);
-    relRecvMsgsOld: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(2048, (idx: number) => false);
+    relRecvMsgsOld: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(4096, (idx: number) => false);
 
     // Packets are re-ordered here
     relRecvOrderMsgs: SlidingArrayBuffer<NetIncomingMessage> = new SlidingArrayBuffer(2048, (idx: number): (NetIncomingMessage | undefined) => undefined);
@@ -287,14 +287,20 @@ export class NetHost {
             reliableMsg.fromWireForm(msg);
 
             let reliableDuplicate = false;
-            if (reliableMsg.originalRelSeqID >= 0) {
-                if (peer.relRecvMsgsOld.canGet(reliableMsg.originalRelSeqID)) {
-                    if (peer.relRecvMsgsOld.get(reliableMsg.originalRelSeqID)) {
-                        reliableDuplicate = true;
+            let relSeqID = reliableMsg.originalRelSeqID >= 0 ? reliableMsg.originalRelSeqID : reliableMsg.seqID;
+
+            if (peer.relRecvMsgsOld.isNew(relSeqID)) {
+                peer.relRecvMsgsOld.set(relSeqID, true); // Mark as received, and continue
+            }
+            else {
+                if (peer.relRecvMsgsOld.canGet(relSeqID)) {
+                    if (peer.relRecvMsgsOld.get(relSeqID) == true) {
+                        reliableDuplicate = true; // This is a duplicate message
                     }
                 }
                 else {
                     this.eventHandler(this, peer, NetEvent.DuplicatesBufferOverrun, reliableMsg);
+                    return;
                 }
             }
 
@@ -340,13 +346,6 @@ export class NetHost {
             // Update our acks
             if (peer.relRecvMsgs.canSet(reliableMsg.relSeqID)) {
                 peer.relRecvMsgs.set(reliableMsg.relSeqID, true);
-            }
-            else {
-                // Message is too old, just ignore
-                // throw "can't update acks";
-            }
-            if (peer.relRecvMsgsOld.canSet(reliableMsg.relSeqID)) {
-                peer.relRecvMsgsOld.set(reliableMsg.relSeqID, true);
             }
             else {
                 // Message is too old, just ignore
@@ -452,7 +451,7 @@ export class NetHost {
                 let delta = curTimestamp - storedMsg.lastSentTimestamp;
                 let originalDelta = curTimestamp - storedMsg.sentTimestamp;
 
-                if (originalDelta >= 1000 && !storedMsg.resent) {
+                if (originalDelta >= peer.rtt * 1.5) {
                     if (storedMsg.msg.critical) {
                         // Re-send
                         storedMsg.resent = true;
@@ -477,6 +476,8 @@ export class NetHost {
                     }
                 }
                 else if (delta >= storedMsg.resendInterval) {
+                    storedMsg.lastSentTimestamp = curTimestamp;
+
                     // Resend callback
                     if (storedMsg.msg.onResend != undefined) {
                         storedMsg.msg.onResend(storedMsg, peer);
