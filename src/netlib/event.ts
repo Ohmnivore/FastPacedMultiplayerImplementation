@@ -12,6 +12,7 @@ export enum NetEvent {
     ReliableOrderedRecvBufferOverflow,
     ReliableOrderedRecvBufferOverrun,
     ReliableDeliveryFailedNoncritical,
+    ReliableDeliveryFailedCritical,
     DisconnectRecv,
     Timeout,
     ConnectionEstablished
@@ -40,6 +41,9 @@ export class NetEventUtils {
         }
         else if (error == NetEvent.ReliableDeliveryFailedNoncritical) {
             return "Reliable message delivery failed noncritical";
+        }
+        else if (error == NetEvent.ReliableDeliveryFailedCritical) {
+            return "Reliable message delivery failed critical";
         }
         else if (error == NetEvent.DisconnectRecv) {
             return "Disconnect request received";

@@ -64,7 +64,7 @@ class NetPeerInternal implements NetPeer {
     relRecvAckTailID: number = -1;
 
     // The reliable messages received from this peer
-    relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(128, (idx: number) => false);
+    relRecvMsgs: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(32, (idx: number) => false);
     relRecvMsgsOld: SlidingArrayBuffer<boolean> = new SlidingArrayBuffer(4096, (idx: number) => false);
 
     // Packets are re-ordered here
@@ -84,6 +84,7 @@ class NetPeerInternal implements NetPeer {
 
     // Stats
     rtt: number = 100; // milliseconds, assume 100 when peer connects
+    rttVar: number = 0.0;
     protected smoothingFactor: number;
     dropRate: number = 0.0;
 
@@ -112,6 +113,7 @@ class NetPeerInternal implements NetPeer {
 
     updateRTT(rtt: number) {
         // Exponential smoothing
+        this.rttVar = Math.abs(this.rtt - rtt) * this.smoothingFactor + this.rttVar * (1.0 - this.smoothingFactor);
         this.rtt = rtt * this.smoothingFactor + this.rtt * (1.0 - this.smoothingFactor);
     }
 
@@ -232,6 +234,7 @@ export class NetHost {
             reliableMsg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
 
             // Store message
+            this.checkLost(peer, reliableMsg.relSeqID);
             peer.relSentMsgs.set(reliableMsg.relSeqID, new NetStoredReliableMessage(reliableMsg, curTimestamp));
 
             // Enqueue
@@ -384,6 +387,22 @@ export class NetHost {
                             }
 
                             stored.acked = true;
+
+                            while (true) {
+                                if (stored.resentSeqID < 0) {
+                                    break;
+                                }
+                                else {
+                                    let newStored = peer.relSentMsgs.get(stored.resentSeqID);
+                                    if (newStored == undefined) {
+                                        break;
+                                    }
+                                    else {
+                                        newStored.acked = true;
+                                        stored = newStored;
+                                    }
+                                }
+                            }
                         }
                     }
                     else if (relSeqID >= 0) {
@@ -448,29 +467,29 @@ export class NetHost {
         // Resend un-acked packets at the chosen rates
         let start = peer.relSentMsgs.getHeadID() - peer.relSentMsgs.getMaxSize() + 1;
         let end = peer.relSentMsgs.getHeadID();
-        for (let relSeqID = start; relSeqID <= end; ++relSeqID) {
+        let numSent = 0;
+
+        for (let relSeqID = start; relSeqID <= end && numSent <= 10; ++relSeqID) {
             let storedMsg = peer.relSentMsgs.get(relSeqID);
 
             if (storedMsg != undefined && !storedMsg.acked && !storedMsg.obsolete) {
                 let delta = curTimestamp - storedMsg.lastSentTimestamp;
 
-                if (storedMsg.msg.relSeqID < peer.relRecvAckTailID) {
+                if (delta >= peer.rtt + peer.rttVar * 2.0) {
                     if (storedMsg.msg.critical) {
                         // Re-send
                         storedMsg.obsolete = true;
                         storedMsg.msg.seqID = peer.msgSeqID++;
                         storedMsg.msg.relSeqID = peer.relSeqID++;
-
-                        // Attach our acks
-                        storedMsg.msg.relRecvHeadID = peer.relRecvMsgs.getHeadID();
-                        storedMsg.msg.relRecvBuffer = peer.relRecvMsgs.cloneBuffer() as Array<boolean>;
+                        storedMsg.resentSeqID = storedMsg.msg.relSeqID;
 
                         // Store message
+                        this.checkLost(peer, storedMsg.msg.relSeqID);
                         peer.relSentMsgs.set(storedMsg.msg.relSeqID, new NetStoredReliableMessage(storedMsg.msg, curTimestamp));
 
                         // Enqueue
                         peer.sendBuffer.push(storedMsg.msg.getWireForm());
-                        peer.relSent = true;
+                        numSent++;
                     }
                     else {
                         // Give up
@@ -489,6 +508,7 @@ export class NetHost {
                     // Enqueue
                     peer.sendBuffer.push(storedMsg.msg.getWireForm());
                     storedMsg.timesSent++;
+                    numSent++;
                 }
             }
         }
@@ -502,11 +522,31 @@ export class NetHost {
         peer.relSent = false;
 
         // Returns a copy of the buffer, and empties the original buffer
+        // if (this.debug) console.log(peer.rttVar);
         return peer.sendBuffer.splice(0);
     }
 
     getRecvBuffer(): Array<NetIncomingMessage> {
         // Returns a copy of the buffer, and empties the original buffer
         return this.recvBuffer.splice(0);
+    }
+
+    protected checkLost(peer: NetPeerInternal, newRelSeqID: number) {
+        let tailID = peer.relSentMsgs.getHeadID() - peer.relSentMsgs.getMaxSize() + 1;
+        let newTailID = newRelSeqID - peer.relSentMsgs.getMaxSize() + 1;
+
+        if (newTailID <= tailID) {
+            return;
+        }
+
+        for (let relSeqID = tailID; relSeqID < newTailID; ++relSeqID) {
+            if (peer.relSentMsgs.canGet(relSeqID)) {
+                let storedMsg = peer.relSentMsgs.get(relSeqID);
+                
+                if (storedMsg != undefined && !storedMsg.acked && !storedMsg.obsolete && storedMsg.msg.critical) {
+                    this.eventHandler(this, peer, NetEvent.ReliableDeliveryFailedCritical, storedMsg.msg);
+                }
+            }
+        }
     }
 }

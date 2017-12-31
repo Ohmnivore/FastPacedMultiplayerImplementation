@@ -143,6 +143,7 @@ export class NetStoredReliableMessage {
     timesSent: number = 1;
     obsolete: boolean = false;
     acked: boolean = false;
+    resentSeqID: number = -1;
 
     constructor(msg: NetReliableMessage, curTimestamp: number) {
         this.msg = msg;
