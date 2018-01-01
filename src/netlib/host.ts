@@ -381,25 +381,41 @@ export class NetHost {
                             stored.rtt = rtt;
                             peer.updateRTT(rtt);
 
-                            // Ack callback
-                            if (stored.msg.onAck != undefined) {
-                                stored.msg.onAck(stored.msg, peer);
-                            }
-
-                            stored.acked = true;
-
+                            // Traverse the linked list of resent messages
+                            // Mark all nodes acked
+                            // Call onAck on the root
                             while (true) {
+                                // This is the root
                                 if (stored.resentSeqID < 0) {
+                                    // Ack callback
+                                    if (!stored.acked && stored.msg.onAck != undefined) {
+                                        stored.msg.onAck(stored.msg, peer);
+                                    }
+
+                                    // Mark acked
+                                    stored.acked = true;
+
                                     break;
                                 }
+                                // This is a node
                                 else {
-                                    let newStored = peer.relSentMsgs.get(stored.resentSeqID);
-                                    if (newStored == undefined) {
-                                        break;
+                                    // Mark acked
+                                    stored.acked = true;
+
+                                    // Get next node
+                                    if (peer.relSentMsgs.canGet(stored.resentSeqID)) {
+                                        let newStored = peer.relSentMsgs.get(stored.resentSeqID);
+                                        if (newStored == undefined) {
+                                            this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, reliableMsg);
+                                            return;
+                                        }
+                                        else {
+                                            stored = newStored;
+                                        }
                                     }
                                     else {
-                                        newStored.acked = true;
-                                        stored = newStored;
+                                        this.eventHandler(this, peer, NetEvent.ReliableSendBufferOverrun, reliableMsg);
+                                        return;
                                     }
                                 }
                             }
@@ -467,9 +483,8 @@ export class NetHost {
         // Resend un-acked packets at the chosen rates
         let start = peer.relSentMsgs.getHeadID() - peer.relSentMsgs.getMaxSize() + 1;
         let end = peer.relSentMsgs.getHeadID();
-        let numSent = 0;
 
-        for (let relSeqID = start; relSeqID <= end && numSent <= 10; ++relSeqID) {
+        for (let relSeqID = start; relSeqID <= end; ++relSeqID) {
             let storedMsg = peer.relSentMsgs.get(relSeqID);
 
             if (storedMsg != undefined && !storedMsg.acked && !storedMsg.obsolete) {
@@ -489,7 +504,6 @@ export class NetHost {
 
                         // Enqueue
                         peer.sendBuffer.push(storedMsg.msg.getWireForm());
-                        numSent++;
                     }
                     else {
                         // Give up
@@ -508,7 +522,6 @@ export class NetHost {
                     // Enqueue
                     peer.sendBuffer.push(storedMsg.msg.getWireForm());
                     storedMsg.timesSent++;
-                    numSent++;
                 }
             }
         }

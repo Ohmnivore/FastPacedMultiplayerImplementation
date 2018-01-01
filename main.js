@@ -853,23 +853,37 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                                 var rtt = curTimestamp - stored.sentTimestamp;
                                 stored.rtt = rtt;
                                 peer.updateRTT(rtt);
-                                // Ack callback
-                                if (stored.msg.onAck != undefined) {
-                                    stored.msg.onAck(stored.msg, peer);
-                                }
-                                stored.acked = true;
+                                // Traverse the linked list of resent messages
+                                // Mark all nodes acked
+                                // Call onAck on the root
                                 while (true) {
+                                    // This is the root
                                     if (stored.resentSeqID < 0) {
+                                        // Ack callback
+                                        if (!stored.acked && stored.msg.onAck != undefined) {
+                                            stored.msg.onAck(stored.msg, peer);
+                                        }
+                                        // Mark acked
+                                        stored.acked = true;
                                         break;
                                     }
                                     else {
-                                        var newStored = peer.relSentMsgs.get(stored.resentSeqID);
-                                        if (newStored == undefined) {
-                                            break;
+                                        // Mark acked
+                                        stored.acked = true;
+                                        // Get next node
+                                        if (peer.relSentMsgs.canGet(stored.resentSeqID)) {
+                                            var newStored = peer.relSentMsgs.get(stored.resentSeqID);
+                                            if (newStored == undefined) {
+                                                this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, reliableMsg);
+                                                return;
+                                            }
+                                            else {
+                                                stored = newStored;
+                                            }
                                         }
                                         else {
-                                            newStored.acked = true;
-                                            stored = newStored;
+                                            this.eventHandler(this, peer, event_1.NetEvent.ReliableSendBufferOverrun, reliableMsg);
+                                            return;
                                         }
                                     }
                                 }
@@ -928,8 +942,7 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
             // Resend un-acked packets at the chosen rates
             var start = peer.relSentMsgs.getHeadID() - peer.relSentMsgs.getMaxSize() + 1;
             var end = peer.relSentMsgs.getHeadID();
-            var numSent = 0;
-            for (var relSeqID = start; relSeqID <= end && numSent <= 10; ++relSeqID) {
+            for (var relSeqID = start; relSeqID <= end; ++relSeqID) {
                 var storedMsg = peer.relSentMsgs.get(relSeqID);
                 if (storedMsg != undefined && !storedMsg.acked && !storedMsg.obsolete) {
                     var delta = curTimestamp - storedMsg.lastSentTimestamp;
@@ -945,7 +958,6 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                             peer.relSentMsgs.set(storedMsg.msg.relSeqID, new message_1.NetStoredReliableMessage(storedMsg.msg, curTimestamp));
                             // Enqueue
                             peer.sendBuffer.push(storedMsg.msg.getWireForm());
-                            numSent++;
                         }
                         else {
                             // Give up
@@ -962,7 +974,6 @@ define("netlib/host", ["require", "exports", "netlib/event", "netlib/message", "
                         // Enqueue
                         peer.sendBuffer.push(storedMsg.msg.getWireForm());
                         storedMsg.timesSent++;
-                        numSent++;
                     }
                 }
             }
