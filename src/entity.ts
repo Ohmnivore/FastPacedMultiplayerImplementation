@@ -31,6 +31,7 @@ export class Entity {
     displayX: number = 0;
     speed: number = 2;
     connected: boolean = true;
+    error: boolean = false;
 
     applyInput(input: Input) {
         this.x += input.pressTime * this.speed;
@@ -52,7 +53,6 @@ export class LocalEntity extends Entity {
     protected inputSequenceNumber: number = 0;
     protected pendingInputs: Array<Input> = [];
 
-    protected error: boolean = false;
     protected errorTimer: number = 0;
 
     incrementSequenceNumber(): number {
