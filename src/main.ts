@@ -145,4 +145,10 @@ function keyHandler(e: KeyboardEvent) {
     else if (e.key == "a") {
         player2.keyLeft = (e.type == "keydown");
     }
+    else if (e.key == "e") {
+        server.keyE = (e.type == "keydown");
+    }
+    else if (e.key == "r") {
+        server.keyR = (e.type == "keydown");
+    }
 }

@@ -1,4 +1,4 @@
-import { Input, ServerEntity, ServerEntities } from "./entity";
+import { Input, ServerEntity, ServerEntities, ServerEntityState } from "./entity";
 import { LagNetwork } from "./lagNetwork";
 import { Client } from "./client";
 import { renderWorld } from "./render";
@@ -8,6 +8,9 @@ import { NetEvent, NetEventUtils } from "./netlib/event";
 import { NetUnreliableMessage, NetMessage } from "./netlib/message";
 
 export class Server extends Host {
+
+    keyE: boolean = false; // Simulate small de-sync
+    keyR: boolean = false; // Simulate large de-sync
 
     // Connected clients and their entities
     protected clients: Array<Client> = [];
@@ -42,7 +45,7 @@ export class Server extends Host {
       
         // Set the initial state of the Entity (e.g. spawn point)
         let spawnPoints = [4, 6];
-        entity.x = spawnPoints[client.localEntityID];
+        entity.setPosition(spawnPoints[client.localEntityID]);
     }
 
     update() {
@@ -60,7 +63,10 @@ export class Server extends Host {
 
         for (let i = 0; i < numClients; i++) {
             let entity = this.entities[i];
-            worldState.push(entity.constructState());
+            let src = entity.constructState();
+            let copy = new ServerEntityState();
+            copy.copy(src);
+            worldState.push(copy);
         }
 
         // Broadcast the state to all the clients
@@ -84,6 +90,14 @@ export class Server extends Host {
 
         messages.forEach(message => {
             let input = message.payload as Input;
+
+            if (this.keyE) {
+                input.pressTime *= 3.0;
+            }
+            else if (this.keyR) {
+                input.pressTime *= 10.0;
+            }
+
             this.entities[input.entityID].processInput(input);
         });
 

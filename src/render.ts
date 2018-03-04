@@ -12,7 +12,7 @@ export function renderWorld(canvas: HTMLCanvasElement, entities: Entities) {
 
         // Compute size and position
         let radius = canvas.height * 0.9 / 2.0;
-        let x = (entity.x / 10.0) * canvas.width;
+        let x = (entity.displayX / 10.0) * canvas.width;
 
         // Draw the entity
         let ctx = canvas.getContext("2d");

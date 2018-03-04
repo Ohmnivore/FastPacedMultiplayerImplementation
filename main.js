@@ -18,17 +18,29 @@ define("entity", ["require", "exports"], function (require, exports) {
     var Input = /** @class */ (function () {
         function Input() {
         }
+        Input.prototype.copy = function (src) {
+            this.pressTime = src.pressTime;
+            this.inputSequenceNumber = src.inputSequenceNumber;
+            this.entityID = src.entityID;
+            this.position = src.position;
+        };
         return Input;
     }());
     exports.Input = Input;
     var Entity = /** @class */ (function () {
         function Entity() {
             this.x = 0;
+            this.displayX = 0;
             this.speed = 2;
             this.connected = true;
         }
         Entity.prototype.applyInput = function (input) {
             this.x += input.pressTime * this.speed;
+            this.setPosition(this.x);
+        };
+        Entity.prototype.setPosition = function (x) {
+            this.x = x;
+            this.displayX = x;
         };
         return Entity;
     }());
@@ -41,10 +53,13 @@ define("entity", ["require", "exports"], function (require, exports) {
             var _this = _super !== null && _super.apply(this, arguments) || this;
             _this.inputSequenceNumber = 0;
             _this.pendingInputs = [];
+            _this.error = false;
+            _this.errorTimer = 0;
             return _this;
         }
         LocalEntity.prototype.incrementSequenceNumber = function () {
-            return this.inputSequenceNumber++;
+            this.inputSequenceNumber++;
+            return this.inputSequenceNumber;
         };
         LocalEntity.prototype.numberOfPendingInputs = function () {
             return this.pendingInputs.length;
@@ -55,10 +70,37 @@ define("entity", ["require", "exports"], function (require, exports) {
         LocalEntity.prototype.dropInputs = function () {
             this.pendingInputs = [];
         };
+        LocalEntity.prototype.setPosition = function (x) {
+            this.x = x;
+        };
+        LocalEntity.prototype.errorCorrect = function (dtSec) {
+            if (this.error) {
+                var weight = 0.65;
+                this.displayX = this.displayX * weight + this.x * (1.0 - weight);
+                this.errorTimer += dtSec;
+                if (this.errorTimer > 0.25) {
+                    this.error = false;
+                }
+            }
+            else {
+                this.displayX = this.x;
+            }
+        };
         LocalEntity.prototype.reconcile = function (state) {
             // Set authoritative position
-            // A possible improvement for a real game would be to smooth this out
             this.x = state.position;
+            var idx = 0;
+            while (idx < this.pendingInputs.length) {
+                var input = this.pendingInputs[idx];
+                if (input.inputSequenceNumber == state.lastProcessedInput) {
+                    var offset = state.position - input.position;
+                    if (offset != 0.0) {
+                        this.error = true;
+                        this.errorTimer = 0.0;
+                    }
+                }
+                idx++;
+            }
             // Server Reconciliation. Re-apply all the inputs not yet processed by
             // the server.
             var j = 0;
@@ -125,11 +167,13 @@ define("entity", ["require", "exports"], function (require, exports) {
     ///////////////////////////////////////////////////////////////////////////////
     // ServerEntity: Represents the players on the server
     var ServerEntityState = /** @class */ (function () {
-        function ServerEntityState(entityID, position, lastProcessedInput) {
-            this.entityID = entityID;
-            this.position = position;
-            this.lastProcessedInput = lastProcessedInput;
+        function ServerEntityState() {
         }
+        ServerEntityState.prototype.copy = function (src) {
+            this.entityID = src.entityID;
+            this.position = src.position;
+            this.lastProcessedInput = src.lastProcessedInput;
+        };
         return ServerEntityState;
     }());
     exports.ServerEntityState = ServerEntityState;
@@ -144,14 +188,18 @@ define("entity", ["require", "exports"], function (require, exports) {
             return this.lastProcessedInput;
         };
         ServerEntity.prototype.constructState = function () {
-            return new ServerEntityState(this.entityID, this.x, this.lastProcessedInput);
+            var state = new ServerEntityState();
+            state.entityID = this.entityID;
+            state.position = this.x;
+            state.lastProcessedInput = this.lastProcessedInput;
+            return state;
         };
         // Check whether this input seems to be valid (e.g. "make sense" according
         // to the physical rules of the World)
         ServerEntity.prototype.validateInput = function (input) {
-            if (Math.abs(input.pressTime) > 1.0 / 40.0) {
-                return false;
-            }
+            // if (Math.abs(input.pressTime) > 1.0 / 40.0) {
+            //     return false;
+            // }
             return true;
         };
         ServerEntity.prototype.processInput = function (input) {
@@ -268,7 +316,7 @@ define("render", ["require", "exports"], function (require, exports) {
             var entity = entities[i];
             // Compute size and position
             var radius = canvas.height * 0.9 / 2.0;
-            var x = (entity.x / 10.0) * canvas.width;
+            var x = (entity.displayX / 10.0) * canvas.width;
             // Draw the entity
             var ctx = canvas.getContext("2d");
             if (ctx != undefined) {
@@ -1064,6 +1112,8 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/even
         __extends(Server, _super);
         function Server(canvas, status) {
             var _this = _super.call(this) || this;
+            _this.keyE = false; // Simulate small de-sync
+            _this.keyR = false; // Simulate large de-sync
             // Connected clients and their entities
             _this.clients = [];
             _this.entities = {};
@@ -1089,7 +1139,7 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/even
             entity.entityID = client.localEntityID;
             // Set the initial state of the Entity (e.g. spawn point)
             var spawnPoints = [4, 6];
-            entity.x = spawnPoints[client.localEntityID];
+            entity.setPosition(spawnPoints[client.localEntityID]);
         };
         Server.prototype.update = function () {
             this.processInputs();
@@ -1105,7 +1155,10 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/even
             var numClients = this.clients.length;
             for (var i = 0; i < numClients; i++) {
                 var entity = this.entities[i];
-                worldState.push(entity.constructState());
+                var src = entity.constructState();
+                var copy = new entity_1.ServerEntityState();
+                copy.copy(src);
+                worldState.push(copy);
             }
             var _loop_1 = function (i) {
                 var client = this_1.clients[i];
@@ -1130,6 +1183,12 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/even
             var messages = this.pollMessages(+new Date());
             messages.forEach(function (message) {
                 var input = message.payload;
+                if (_this.keyE) {
+                    input.pressTime *= 3.0;
+                }
+                else if (_this.keyR) {
+                    input.pressTime *= 10.0;
+                }
                 _this.entities[input.entityID].processInput(input);
             });
             // Show some info
@@ -1183,17 +1242,22 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
         // Update Client state
         Client.prototype.update = function () {
             var _this = this;
+            // Compute delta time since last update
+            var nowTS = +new Date();
+            var lastTS = this.lastTS || nowTS;
+            var dtSec = (nowTS - lastTS) / 1000.0;
+            this.lastTS = nowTS;
             // Listen to the server
             this.processServerMessages();
             if (this.localEntity == undefined) {
                 return; // Not connected yet
             }
             // Process inputs
-            this.processInputs();
+            this.processInputs(nowTS, dtSec);
+            this.localEntity.errorCorrect(dtSec);
             // Send messages
-            var curTimestamp = +new Date();
-            this.netHost.getSendBuffer(this.serverPeerID, curTimestamp).forEach(function (message) {
-                _this.server.network.send(curTimestamp, _this.sendState, message, _this.netAddress.getID());
+            this.netHost.getSendBuffer(this.serverPeerID, nowTS).forEach(function (message) {
+                _this.server.network.send(nowTS, _this.sendState, message, _this.netAddress.getID());
             });
             // Interpolate other entities
             if (this.entityInterpolation) {
@@ -1211,12 +1275,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
         };
         // Get inputs and send them to the server
         // If enabled, do client-side prediction
-        Client.prototype.processInputs = function () {
-            // Compute delta time since last update
-            var nowTS = +new Date();
-            var lastTS = this.lastTS || nowTS;
-            var dtSec = (nowTS - lastTS) / 1000.0;
-            this.lastTS = nowTS;
+        Client.prototype.processInputs = function (nowTS, dtSec) {
             // Package player's input
             var input = new entity_2.Input();
             if (this.keyRight) {
@@ -1232,11 +1291,14 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             // Send the input to the server
             input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
             input.entityID = this.localEntityID;
-            this.netHost.enqueueSend(new message_3.NetReliableOrderedMessage(input), this.serverPeerID, nowTS);
             // Do client-side prediction
             if (this.clientSidePrediction && this.localEntity != undefined) {
                 this.localEntity.applyInput(input);
             }
+            input.position = this.localEntity.x;
+            var copy = new entity_2.Input();
+            copy.copy(input);
+            this.netHost.enqueueSend(new message_3.NetReliableOrderedMessage(copy), this.serverPeerID, nowTS);
             // Save this input for later reconciliation
             this.localEntity.saveInput(input);
         };
@@ -1294,13 +1356,13 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             else {
                 // Reconciliation is disabled, so drop all the saved inputs.
                 entity.dropInputs();
-                entity.x = state.position;
+                entity.setPosition(state.position);
             }
         };
         Client.prototype.processRemoteEntityState = function (entity, state) {
             if (!this.entityInterpolation) {
                 // Entity interpolation is disabled - just accept the server's position.
-                entity.x = state.position;
+                entity.setPosition(state.position);
             }
             else {
                 // Add it to the position buffer.
@@ -1659,6 +1721,12 @@ define("main", ["require", "exports", "client", "server", "netlibTest"], functio
         }
         else if (e.key == "a") {
             player2.keyLeft = (e.type == "keydown");
+        }
+        else if (e.key == "e") {
+            server.keyE = (e.type == "keydown");
+        }
+        else if (e.key == "r") {
+            server.keyR = (e.type == "keydown");
         }
     }
 });

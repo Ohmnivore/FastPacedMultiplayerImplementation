@@ -45,6 +45,12 @@ export class Client extends Host {
 
     // Update Client state
     update() {
+        // Compute delta time since last update
+        let nowTS = +new Date();
+        let lastTS = this.lastTS || nowTS;
+        let dtSec = (nowTS - lastTS) / 1000.0;
+        this.lastTS = nowTS;
+
         // Listen to the server
         this.processServerMessages();
 
@@ -53,12 +59,12 @@ export class Client extends Host {
         }
 
         // Process inputs
-        this.processInputs();
+        this.processInputs(nowTS, dtSec);
+        this.localEntity.errorCorrect(dtSec);
 
         // Send messages
-        let curTimestamp = +new Date();
-        this.netHost.getSendBuffer(this.serverPeerID, curTimestamp).forEach(message => {
-            this.server.network.send(curTimestamp, this.sendState, message, this.netAddress.getID());
+        this.netHost.getSendBuffer(this.serverPeerID, nowTS).forEach(message => {
+            this.server.network.send(nowTS, this.sendState, message, this.netAddress.getID());
         });
 
         // Interpolate other entities
@@ -80,13 +86,7 @@ export class Client extends Host {
 
     // Get inputs and send them to the server
     // If enabled, do client-side prediction
-    protected processInputs() {
-        // Compute delta time since last update
-        let nowTS = +new Date();
-        let lastTS = this.lastTS || nowTS;
-        let dtSec = (nowTS - lastTS) / 1000.0;
-        this.lastTS = nowTS;
-
+    protected processInputs(nowTS: number, dtSec: number) {
         // Package player's input
         let input = new Input();
         if (this.keyRight) {
@@ -104,12 +104,16 @@ export class Client extends Host {
         input.inputSequenceNumber = this.localEntity.incrementSequenceNumber();
         input.entityID = this.localEntityID;
 
-        this.netHost.enqueueSend(new NetReliableOrderedMessage(input), this.serverPeerID, nowTS);
-
         // Do client-side prediction
         if (this.clientSidePrediction && this.localEntity != undefined) {
             this.localEntity.applyInput(input);
         }
+
+        input.position = this.localEntity.x;
+        let copy = new Input();
+        copy.copy(input);
+
+        this.netHost.enqueueSend(new NetReliableOrderedMessage(copy), this.serverPeerID, nowTS);
 
         // Save this input for later reconciliation
         this.localEntity.saveInput(input);
@@ -175,14 +179,14 @@ export class Client extends Host {
         else {
             // Reconciliation is disabled, so drop all the saved inputs.
             entity.dropInputs();
-            entity.x = state.position;
+            entity.setPosition(state.position);
         }
     }
 
     protected processRemoteEntityState(entity: RemoteEntity, state: ServerEntityState) {
         if (!this.entityInterpolation) {
             // Entity interpolation is disabled - just accept the server's position.
-            entity.x = state.position;
+            entity.setPosition(state.position);
         }
         else {
             // Add it to the position buffer.

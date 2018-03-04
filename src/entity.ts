@@ -14,17 +14,32 @@ export class Input {
     pressTime: number;
     inputSequenceNumber: number;
     entityID: number;
+    position: number;
+
+    copy(src: Input) {
+        this.pressTime = src.pressTime;
+        this.inputSequenceNumber = src.inputSequenceNumber;
+        this.entityID = src.entityID;
+        this.position = src.position;
+    }
 }
 
 export class Entity {
 
     entityID: number;
     x: number = 0;
+    displayX: number = 0;
     speed: number = 2;
     connected: boolean = true;
 
     applyInput(input: Input) {
         this.x += input.pressTime * this.speed;
+        this.setPosition(this.x);
+    }
+
+    setPosition(x: number) {
+        this.x = x;
+        this.displayX = x;
     }
 }
 
@@ -37,8 +52,12 @@ export class LocalEntity extends Entity {
     protected inputSequenceNumber: number = 0;
     protected pendingInputs: Array<Input> = [];
 
+    protected error: boolean = false;
+    protected errorTimer: number = 0;
+
     incrementSequenceNumber(): number {
-        return this.inputSequenceNumber++;
+        this.inputSequenceNumber++;
+        return this.inputSequenceNumber;
     }
 
     numberOfPendingInputs(): number {
@@ -53,11 +72,45 @@ export class LocalEntity extends Entity {
         this.pendingInputs = [];
     }
 
+    setPosition(x: number) {
+        this.x = x;
+    }
+
+    errorCorrect(dtSec: number) {
+        if (this.error) {
+            let weight = 0.65;
+            this.displayX = this.displayX * weight + this.x * (1.0 - weight);
+
+            this.errorTimer += dtSec;
+
+            if (this.errorTimer > 0.25) {
+                this.error = false;
+            }
+        }
+        else {
+            this.displayX = this.x;
+        }
+    }
+
     reconcile(state: ServerEntityState) {
         // Set authoritative position
-        // A possible improvement for a real game would be to smooth this out
         this.x = state.position;
-        
+
+        let idx = 0;
+        while (idx < this.pendingInputs.length) {
+            var input = this.pendingInputs[idx];
+            
+            if (input.inputSequenceNumber == state.lastProcessedInput) {
+                let offset = state.position - input.position;
+                if (offset != 0.0) {
+                    this.error = true;
+                    this.errorTimer = 0.0;
+                }
+            }
+            
+            idx++;
+        }
+
         // Server Reconciliation. Re-apply all the inputs not yet processed by
         // the server.
         var j = 0;
@@ -137,10 +190,10 @@ export class ServerEntityState {
     position: number;
     lastProcessedInput: number;
 
-    constructor(entityID: number, position: number, lastProcessedInput: number) {
-        this.entityID = entityID;
-        this.position = position;
-        this.lastProcessedInput = lastProcessedInput;
+    copy(src: ServerEntityState) {
+        this.entityID = src.entityID;
+        this.position = src.position;
+        this.lastProcessedInput = src.lastProcessedInput;
     }
 }
 
@@ -153,19 +206,19 @@ export class ServerEntity extends Entity {
     }
 
     constructState(): ServerEntityState {
-        return new ServerEntityState(
-                this.entityID,
-                this.x,
-                this.lastProcessedInput
-            );
+        let state = new ServerEntityState();
+        state.entityID = this.entityID;
+        state.position = this.x;
+        state.lastProcessedInput = this.lastProcessedInput;
+        return state;
     }
 
     // Check whether this input seems to be valid (e.g. "make sense" according
     // to the physical rules of the World)
     validateInput(input: Input) {
-        if (Math.abs(input.pressTime) > 1.0 / 40.0) {
-            return false;
-        }
+        // if (Math.abs(input.pressTime) > 1.0 / 40.0) {
+        //     return false;
+        // }
         return true;
     }
 
