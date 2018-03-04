@@ -22,12 +22,17 @@ export function renderWorld(canvas: HTMLCanvasElement, entities: Entities) {
             ctx.fillStyle = colours[entity.entityID];
             ctx.fill();
             ctx.lineWidth = 5;
-            if (entity.connected) {
-                ctx.strokeStyle = "dark" + colours[entity.entityID];
-            }
-            else {
+
+            if (!entity.connected) {
                 ctx.strokeStyle = "yellow";
             }
+            else if (entity.error) {
+                ctx.strokeStyle = "green";
+            }
+            else {
+                ctx.strokeStyle = "dark" + colours[entity.entityID];
+            }
+
             ctx.stroke();
         }
     }
