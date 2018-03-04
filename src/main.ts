@@ -151,4 +151,10 @@ function keyHandler(e: KeyboardEvent) {
     else if (e.key == "r") {
         server.keyR = (e.type == "keydown");
     }
+    else if (e.key == "f") {
+        player1.keyF = (e.type == "keydown");
+    }
+    else if (e.key == "g") {
+        player1.keyG = (e.type == "keydown");
+    }
 }

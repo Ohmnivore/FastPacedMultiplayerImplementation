@@ -33,6 +33,10 @@ export class Client extends Host {
     serverReconciliation: boolean = false;
     entityInterpolation: boolean = true;
 
+    // Speedhack
+    keyF: boolean = false;
+    keyG: boolean = false;
+
     constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
         super();
         this.initialize(canvas, status);
@@ -87,6 +91,13 @@ export class Client extends Host {
     // Get inputs and send them to the server
     // If enabled, do client-side prediction
     protected processInputs(nowTS: number, dtSec: number) {
+        if (this.keyF) {
+            dtSec *= 1.5;
+        }
+        else if (this.keyG) {
+            dtSec *= 4.0;
+        }
+
         // Package player's input
         let input = new Input();
         if (this.keyRight) {

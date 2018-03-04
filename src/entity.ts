@@ -201,6 +201,9 @@ export class ServerEntity extends Entity {
 
     protected lastProcessedInput: number = 0;
 
+    serverTimeSimulated: number = 0;
+    clientTimeSimulated: number = 0;
+
     getLastProcessedInput(): number {
         return this.lastProcessedInput;
     }

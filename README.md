@@ -1,5 +1,5 @@
 # Dependencies
-* `TypeScript` 2.6.2
+* `TypeScript` 2.7.1
 * `RequireJS` 2.3.5
 
 # Build

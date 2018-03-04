@@ -182,6 +182,8 @@ define("entity", ["require", "exports"], function (require, exports) {
         function ServerEntity() {
             var _this = _super !== null && _super.apply(this, arguments) || this;
             _this.lastProcessedInput = 0;
+            _this.serverTimeSimulated = 0;
+            _this.clientTimeSimulated = 0;
             return _this;
         }
         ServerEntity.prototype.getLastProcessedInput = function () {
@@ -1183,14 +1185,40 @@ define("server", ["require", "exports", "entity", "render", "host", "netlib/even
             var messages = this.pollMessages(+new Date());
             messages.forEach(function (message) {
                 var input = message.payload;
+                var entity = _this.entities[input.entityID];
+                entity.clientTimeSimulated += Math.abs(input.pressTime);
+                if (entity.clientTimeSimulated > entity.serverTimeSimulated) {
+                    entity.clientTimeSimulated -= Math.abs(input.pressTime);
+                    input.pressTime = 0.0;
+                }
                 if (_this.keyE) {
                     input.pressTime *= 3.0;
                 }
                 else if (_this.keyR) {
                     input.pressTime *= 10.0;
                 }
-                _this.entities[input.entityID].processInput(input);
+                entity.processInput(input);
             });
+            // Compute delta time since last update
+            var nowTS = +new Date();
+            var lastTS = this.lastTS || nowTS;
+            var dtSec = (nowTS - lastTS) / 1000.0;
+            this.lastTS = nowTS;
+            for (var i = 0; i < this.clients.length; i++) {
+                var entity = this.entities[i];
+                entity.serverTimeSimulated += dtSec;
+                var client = this.clients[i];
+                var peer = this.netHost.getPeerByAddress(client.netAddress);
+                if (peer != undefined) {
+                    var ping = (peer.getRTT()) / 1000.0;
+                    var dist = entity.serverTimeSimulated - entity.clientTimeSimulated;
+                    if (dist > ping) {
+                        entity.clientTimeSimulated = entity.serverTimeSimulated - ping;
+                    }
+                }
+                if (entity.entityID == 0)
+                    console.log("server, client: " + entity.serverTimeSimulated + " " + entity.clientTimeSimulated);
+            }
             // Show some info
             var info = "Last acknowledged input: ";
             for (var i = 0; i < this.clients.length; ++i) {
@@ -1233,6 +1261,9 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             _this.clientSidePrediction = false;
             _this.serverReconciliation = false;
             _this.entityInterpolation = true;
+            // Speedhack
+            _this.keyF = false;
+            _this.keyG = false;
             _this.initialize(canvas, status);
             // Update rate
             _this.setUpdateRate(50);
@@ -1276,6 +1307,12 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
         // Get inputs and send them to the server
         // If enabled, do client-side prediction
         Client.prototype.processInputs = function (nowTS, dtSec) {
+            if (this.keyF) {
+                dtSec *= 1.5;
+            }
+            else if (this.keyG) {
+                dtSec *= 4.0;
+            }
             // Package player's input
             var input = new entity_2.Input();
             if (this.keyRight) {
@@ -1727,6 +1764,12 @@ define("main", ["require", "exports", "client", "server", "netlibTest"], functio
         }
         else if (e.key == "r") {
             server.keyR = (e.type == "keydown");
+        }
+        else if (e.key == "f") {
+            player1.keyF = (e.type == "keydown");
+        }
+        else if (e.key == "g") {
+            player1.keyG = (e.type == "keydown");
         }
     }
 });

@@ -90,6 +90,13 @@ export class Server extends Host {
 
         messages.forEach(message => {
             let input = message.payload as Input;
+            let entity = this.entities[input.entityID];
+
+            entity.clientTimeSimulated += Math.abs(input.pressTime);
+            if (entity.clientTimeSimulated > entity.serverTimeSimulated) {
+                entity.clientTimeSimulated -= Math.abs(input.pressTime);
+                input.pressTime = 0.0;
+            }
 
             if (this.keyE) {
                 input.pressTime *= 3.0;
@@ -98,8 +105,32 @@ export class Server extends Host {
                 input.pressTime *= 10.0;
             }
 
-            this.entities[input.entityID].processInput(input);
+            entity.processInput(input);
         });
+
+        // Compute delta time since last update
+        let nowTS = +new Date();
+        let lastTS = this.lastTS || nowTS;
+        let dtSec = (nowTS - lastTS) / 1000.0;
+        this.lastTS = nowTS;
+
+        for (let i = 0; i < this.clients.length; i++) {
+            let entity = this.entities[i];
+            entity.serverTimeSimulated += dtSec;
+
+            let client = this.clients[i];
+            let peer = this.netHost.getPeerByAddress(client.netAddress);
+            if (peer != undefined) {
+                let ping = (peer.getRTT()) / 1000.0;
+                let dist = entity.serverTimeSimulated - entity.clientTimeSimulated;
+                if (dist > ping) {
+                    entity.clientTimeSimulated = entity.serverTimeSimulated - ping;
+                }
+            }
+
+            if (entity.entityID == 0)
+                console.log("server, client: " + entity.serverTimeSimulated + " " + entity.clientTimeSimulated);
+        }
 
         // Show some info
         let info = "Last acknowledged input: ";

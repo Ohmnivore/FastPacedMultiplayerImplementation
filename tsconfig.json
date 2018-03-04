@@ -1,6 +1,7 @@
 {
     "compilerOptions": {
         "strict": true,
+        "strictPropertyInitialization": false,
         "module": "amd",
         "outFile": "main.js"
     }
