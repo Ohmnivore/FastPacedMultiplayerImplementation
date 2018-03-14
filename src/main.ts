@@ -68,6 +68,7 @@ function setPlayerOnChangeListeners(prefix: string) {
     element(prefix + "_symmetric").onchange = updateParameters;
     element(prefix + "_prediction").onchange = updateParameters;
     element(prefix + "_reconciliation").onchange = updateParameters;
+    element(prefix + "_smoothing").onchange = updateParameters;
     element(prefix + "_interpolation").onchange = updateParameters;
 }
 
@@ -116,6 +117,9 @@ function updatePlayerParameters(client: Client, prefix: string) {
 
     client.clientSidePrediction = cbPrediction.checked;
     client.serverReconciliation = cbReconciliation.checked;
+
+    let cbSmoothing = element(prefix + "_smoothing") as HTMLInputElement;
+    client.reconciliationSmoothing = cbSmoothing.checked;
 
     let cbInterpolation = element(prefix + "_interpolation") as HTMLInputElement;
     client.entityInterpolation = cbInterpolation.checked;

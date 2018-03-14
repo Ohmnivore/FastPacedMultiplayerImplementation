@@ -32,6 +32,7 @@ export class Client extends Host {
     clientSidePrediction: boolean = false;
     serverReconciliation: boolean = false;
     entityInterpolation: boolean = true;
+    reconciliationSmoothing: boolean = false;
 
     constructor(canvas: HTMLCanvasElement, status: HTMLElement) {
         super();
@@ -50,6 +51,10 @@ export class Client extends Host {
         let lastTS = this.lastTS || nowTS;
         let dtSec = (nowTS - lastTS) / 1000.0;
         this.lastTS = nowTS;
+
+        if (this.localEntity != undefined) {
+            this.localEntity.smooth = this.reconciliationSmoothing;
+        }
 
         // Listen to the server
         this.processServerMessages();

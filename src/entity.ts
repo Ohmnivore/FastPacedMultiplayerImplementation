@@ -53,6 +53,7 @@ export class LocalEntity extends Entity {
     protected inputSequenceNumber: number = 0;
     protected pendingInputs: Array<Input> = [];
 
+    public smooth: boolean = false;
     protected errorTimer: number = 0;
 
     incrementSequenceNumber(): number {
@@ -77,7 +78,7 @@ export class LocalEntity extends Entity {
     }
 
     errorCorrect(dtSec: number) {
-        if (this.error) {
+        if (this.error && this.smooth) {
             let weight = 0.65;
             this.displayX = this.displayX * weight + this.x * (1.0 - weight);
 
@@ -89,6 +90,10 @@ export class LocalEntity extends Entity {
         }
         else {
             this.displayX = this.x;
+
+            if (!this.smooth) {
+                this.error = false;
+            }
         }
     }
 

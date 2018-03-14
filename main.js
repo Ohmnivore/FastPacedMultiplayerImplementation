@@ -33,6 +33,7 @@ define("entity", ["require", "exports"], function (require, exports) {
             this.displayX = 0;
             this.speed = 2;
             this.connected = true;
+            this.error = false;
         }
         Entity.prototype.applyInput = function (input) {
             this.x += input.pressTime * this.speed;
@@ -53,7 +54,7 @@ define("entity", ["require", "exports"], function (require, exports) {
             var _this = _super !== null && _super.apply(this, arguments) || this;
             _this.inputSequenceNumber = 0;
             _this.pendingInputs = [];
-            _this.error = false;
+            _this.smooth = false;
             _this.errorTimer = 0;
             return _this;
         }
@@ -74,7 +75,7 @@ define("entity", ["require", "exports"], function (require, exports) {
             this.x = x;
         };
         LocalEntity.prototype.errorCorrect = function (dtSec) {
-            if (this.error) {
+            if (this.error && this.smooth) {
                 var weight = 0.65;
                 this.displayX = this.displayX * weight + this.x * (1.0 - weight);
                 this.errorTimer += dtSec;
@@ -84,6 +85,9 @@ define("entity", ["require", "exports"], function (require, exports) {
             }
             else {
                 this.displayX = this.x;
+                if (!this.smooth) {
+                    this.error = false;
+                }
             }
         };
         LocalEntity.prototype.reconcile = function (state) {
@@ -325,11 +329,14 @@ define("render", ["require", "exports"], function (require, exports) {
                 ctx.fillStyle = colours[entity.entityID];
                 ctx.fill();
                 ctx.lineWidth = 5;
-                if (entity.connected) {
-                    ctx.strokeStyle = "dark" + colours[entity.entityID];
+                if (!entity.connected) {
+                    ctx.strokeStyle = "yellow";
+                }
+                else if (entity.error) {
+                    ctx.strokeStyle = "green";
                 }
                 else {
-                    ctx.strokeStyle = "yellow";
+                    ctx.strokeStyle = "dark" + colours[entity.entityID];
                 }
                 ctx.stroke();
             }
@@ -1233,6 +1240,7 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             _this.clientSidePrediction = false;
             _this.serverReconciliation = false;
             _this.entityInterpolation = true;
+            _this.reconciliationSmoothing = false;
             _this.initialize(canvas, status);
             // Update rate
             _this.setUpdateRate(50);
@@ -1247,6 +1255,9 @@ define("client", ["require", "exports", "entity", "lagNetwork", "render", "host"
             var lastTS = this.lastTS || nowTS;
             var dtSec = (nowTS - lastTS) / 1000.0;
             this.lastTS = nowTS;
+            if (this.localEntity != undefined) {
+                this.localEntity.smooth = this.reconciliationSmoothing;
+            }
             // Listen to the server
             this.processServerMessages();
             if (this.localEntity == undefined) {
@@ -1655,6 +1666,7 @@ define("main", ["require", "exports", "client", "server", "netlibTest"], functio
         element(prefix + "_symmetric").onchange = updateParameters;
         element(prefix + "_prediction").onchange = updateParameters;
         element(prefix + "_reconciliation").onchange = updateParameters;
+        element(prefix + "_smoothing").onchange = updateParameters;
         element(prefix + "_interpolation").onchange = updateParameters;
     }
     // Update simulation parameters from UI
@@ -1696,6 +1708,8 @@ define("main", ["require", "exports", "client", "server", "netlibTest"], functio
         }
         client.clientSidePrediction = cbPrediction.checked;
         client.serverReconciliation = cbReconciliation.checked;
+        var cbSmoothing = element(prefix + "_smoothing");
+        client.reconciliationSmoothing = cbSmoothing.checked;
         var cbInterpolation = element(prefix + "_interpolation");
         client.entityInterpolation = cbInterpolation.checked;
     }
