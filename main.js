@@ -98,7 +98,7 @@ define("entity", ["require", "exports"], function (require, exports) {
                 var input = this.pendingInputs[idx];
                 if (input.inputSequenceNumber == state.lastProcessedInput) {
                     var offset = state.position - input.position;
-                    if (offset != 0.0) {
+                    if (Math.abs(offset) >= 0.00001) {
                         this.error = true;
                         this.errorTimer = 0.0;
                     }

@@ -107,7 +107,7 @@ export class LocalEntity extends Entity {
             
             if (input.inputSequenceNumber == state.lastProcessedInput) {
                 let offset = state.position - input.position;
-                if (offset != 0.0) {
+                if (Math.abs(offset) >= 0.00001) { // Epsilon
                     this.error = true;
                     this.errorTimer = 0.0;
                 }
