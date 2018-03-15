@@ -76,10 +76,11 @@ define("entity", ["require", "exports"], function (require, exports) {
         };
         LocalEntity.prototype.errorCorrect = function (dtSec) {
             if (this.error && this.smooth) {
-                var weight = 0.65;
+                var weight = Math.max(0.0, 0.75 - this.errorTimer);
                 this.displayX = this.displayX * weight + this.x * (1.0 - weight);
                 this.errorTimer += dtSec;
-                if (this.errorTimer > 0.25) {
+                var offset = this.displayX - this.x;
+                if (Math.abs(offset) < 0.00001) {
                     this.error = false;
                 }
             }

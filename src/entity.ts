@@ -79,12 +79,13 @@ export class LocalEntity extends Entity {
 
     errorCorrect(dtSec: number) {
         if (this.error && this.smooth) {
-            let weight = 0.65;
+            let weight = Math.max(0.0, 0.75 - this.errorTimer);
             this.displayX = this.displayX * weight + this.x * (1.0 - weight);
 
             this.errorTimer += dtSec;
 
-            if (this.errorTimer > 0.25) {
+            let offset = this.displayX - this.x;
+            if (Math.abs(offset) < 0.00001) {
                 this.error = false;
             }
         }
@@ -107,7 +108,7 @@ export class LocalEntity extends Entity {
             
             if (input.inputSequenceNumber == state.lastProcessedInput) {
                 let offset = state.position - input.position;
-                if (Math.abs(offset) >= 0.00001) { // Epsilon
+                if (Math.abs(offset) >= 0.00001) {
                     this.error = true;
                     this.errorTimer = 0.0;
                 }
